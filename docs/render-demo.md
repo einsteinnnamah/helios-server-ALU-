@@ -92,7 +92,7 @@ Helios election administrator. Students without that grant cannot close or tally
 
 ## Checks and remaining operational limits
 
-Local Helios verification: 228 tests pass, including real encryption, registration,
+Local Helios verification: 229 tests pass, including real encryption, registration,
 proof verification, eager casting/tallying and bridge browser security tests.
 Frontend security tests use production handlers and an isolated PostgreSQL database:
 replay, expiry, concurrent redemption, tampered signature, client/election/callback
@@ -100,7 +100,7 @@ binding, ineligible identities, unauthenticated exchange, revocation and email c
 Use Node 24 for the frontend test scripts. Run `node scripts/test-helios-bridge.mjs` with `BRIDGE_TEST_DATABASE_URL` pointing
 ONLY to the isolated local `bridge_test` fixture database; it creates mock managed
 Auth tables there, never in Neon. Run Helios tests with `settings_ci` and PostgreSQL.
-Live browser login/booth verification and Docker build must be checked separately.
+The Docker image builds successfully on the free public CI runner, and its encrypted-election tests and strict demo runtime check pass. Live browser login/booth verification must still be completed on the hosted URLs.
 
 Helios bridge sessions last at most five minutes; Neon revocation after exchange
 can take that long to invalidate an existing Helios session. The shared secret

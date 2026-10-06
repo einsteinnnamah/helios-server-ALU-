@@ -677,6 +677,8 @@ def password_voter_login(request, election):
   """
   This is used to log in as a voter for a particular election
   """
+  if election.uuid in settings.ALU_BRIDGE_ELECTIONS:
+    raise PermissionDenied()
   
   # the URL to send the user to after they've logged in
   if request.method == "GET" and 'return_url' in request.GET:
@@ -1651,6 +1653,8 @@ def voters_upload(request, election):
   Upload a CSV of voters with
   voter_type, voter_id, optional_additional_params (e.g. email, name)
   """
+  if election.uuid in settings.ALU_BRIDGE_ELECTIONS:
+    raise PermissionDenied()
 
   # don't allow voter upload when election is tallied
   can_upload, reason = election.can_modify_voters()
@@ -2114,7 +2118,5 @@ def optin_confirm(request, email, code):
         'message': f'The email address {email} has been successfully opted back in to Helios emails.',
         'email': email
     })
-
-
 
 

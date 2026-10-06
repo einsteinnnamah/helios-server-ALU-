@@ -13,10 +13,13 @@ from unittest.mock import Mock, patch
 from django.test import Client, TestCase, override_settings
 from django.core.management import call_command, CommandError
 from io import StringIO
+from types import SimpleNamespace
+from django.urls import reverse
 from helios import datatypes, models, views
 from helios.workflows import homomorphic
 from helios_auth.bridge_protocol import challenge
 from helios_auth.models import BridgeLoginRequest, User
+from helios.security import get_voter
 
 
 @override_settings(AUTH_ENABLED_SYSTEMS=['alu'], ALU_STUDENT_DOMAIN='alustudent.com',
@@ -83,6 +86,7 @@ class BridgeTests(TestCase):
     self.admin.refresh_from_db()
     self.assertTrue(self.admin.admin_p)
     self.assertTrue(views.user_can_admin_election(self.admin, self.election))
+    self.assertEqual(self.client.get(f'/helios/elections/{self.election.uuid}/voters/upload').status_code, 403)
 
   def test_operator_bootstrap_grants_only_one_election(self):
     election_id, subject = str(uuid.uuid4()), str(uuid.uuid4())
@@ -153,6 +157,22 @@ class BridgeTests(TestCase):
     self.client.get('/auth/alu/callback/')
     self.assertNotIn('user', self.client.session)
     self.assertNotIn('CURRENT_VOTER_ID', self.client.session)
+
+  def test_legacy_voter_session_cannot_bypass_bridge_or_substitute_account(self):
+    legacy = models.Voter.objects.create(uuid=str(uuid.uuid4()), election=self.election,
+      voter_login_id='legacy', voter_password='test-only', voter_email='outsider@example.com')
+    session = self.client.session
+    session['CURRENT_VOTER_ID'] = legacy.id
+    session.save()
+    self.assertIsNone(get_voter(SimpleNamespace(session=session), None, self.election))
+    self.assertEqual(self.client.get(reverse(views.password_voter_login,
+      args=[self.election.uuid])).status_code, 403)
+    self.finish(self.begin())
+    user = User.objects.get(user_id='student')
+    own = models.Voter.register_user_in_election(user, self.election)
+    session = self.client.session
+    session['CURRENT_VOTER_ID'] = legacy.id
+    self.assertEqual(get_voter(SimpleNamespace(session=session), user, self.election), own)
 
   def test_auto_registration_encrypted_ballot_verification_and_eager_tally(self):
     if os.environ.get('BRIDGE_TEST_DATABASE_URL'):

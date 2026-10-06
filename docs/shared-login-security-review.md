@@ -9,11 +9,11 @@ Reviewed demo implementation: Helios `267c619`, Next.js `f26af8d`.
 | Replay/concurrent redemption | Random 256-bit code, SHA-256 storage, max 60-second expiry; single PostgreSQL DELETE RETURNING; independently locked/consumed Helios browser request | Concurrent PostgreSQL requests produce exactly one winner; replay and expiry rejected |
 | Login CSRF | Signed state/PKCE request; Helios session-key hash; exact Origin and existing custom CSRF checks; session and CSRF rotation | Wrong state, Origin, CSRF and browser session rejected |
 | Open redirect | Exact configured HTTPS origins/callback; server-selected fixed local election return paths; redirect following disabled on exchange | Signed attacker callback rejected; client also checks fixed destination |
-| Unauthorized election access | Election/client/PKCE/state binding, explicit allowlists in both apps, independent Helios enrollment/private-election checks | Wrong-election redemption/view, closed registration and private enrollment rejected |
+| Unauthorized election access | Election/client/PKCE/state binding, explicit allowlists in both apps, independent Helios enrollment/private-election checks | Wrong-election redemption/view, closed registration, private enrollment, legacy password-voter sessions and roster uploads rejected |
 | Privilege escalation | No role inputs/claims in browser protocol; new Helios users have no admin flag; existing role checks remain server-side | Student tally request returns 403; existing explicit admin grant preserved; bootstrap grants one election only |
 | Credential disclosure | Fragments plus POST bodies; no-store/no-referrer; no request/body/token exception logging; credentials only server environment; grant table RLS with no browser policies | Migration applied in Neon and no browser policies present; no secrets committed |
 
-228 Helios tests passed. 28 frontend security checks passed against isolated real
+229 Helios tests passed. 28 frontend security checks passed against isolated real
 PostgreSQL. A cross-language integration test used Python-signed requests and the
 production TypeScript authorization/exchange handlers, then real Helios encryption,
 automatic voter registration, proof verification, closing and synchronous trustee

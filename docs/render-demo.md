@@ -132,7 +132,7 @@ reclassification and preserved appointment history (37 checks).
 Use Node 24 for the frontend test scripts. Run `node scripts/test-helios-bridge.mjs` with `BRIDGE_TEST_DATABASE_URL` pointing
 ONLY to the isolated local `bridge_test` fixture database; it creates mock managed
 Auth tables there, never in Neon. Run Helios tests with `settings_ci` and PostgreSQL.
-The Docker image builds successfully on the free public CI runner, and its encrypted-election tests and strict demo runtime check pass. Live browser login/booth verification must still be completed on the hosted URLs.
+The Docker image builds successfully on the free public CI runner, and its encrypted-election tests and strict demo runtime check pass. Render Free startup and the hosted HTTPS exchange are verified. The existing Neon browser session opened Helios without another Google login; organizer controls were preserved and direct ballot confirmation returned 403 for the committee account. Live casting and tallying still require a verified noncommittee student account.
 
 Helios bridge sessions last at most five minutes; Neon revocation after exchange
 can take that long to invalidate an existing Helios session. The shared secret

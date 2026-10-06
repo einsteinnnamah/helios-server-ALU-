@@ -37,7 +37,7 @@ from .security import (election_view, election_admin,
                        user_can_admin_election, user_can_feature_election)
 from .view_utils import SUCCESS, FAILURE, return_json, render_template, render_template_raw
 from .workflows import homomorphic
-from .bridge_eligibility import require_voting_access, require_policy_decisions, refresh_policy_reviews
+from .bridge_eligibility import bridge_election, require_voting_access, require_policy_decisions, refresh_policy_reviews
 
 # Parameters for everything
 ELGAMAL_PARAMS = elgamal.Cryptosystem()
@@ -307,6 +307,7 @@ def one_election_view(request, election):
   
   notregistered = False
   eligible_p = True
+  committee_login_p = bridge_election(election) and request.session.get('alu_access_kind') == 'committee'
   
   election_url = get_election_url(election)
   election_badge_url = get_election_badge_url(election)
@@ -355,7 +356,7 @@ def one_election_view(request, election):
                           'voter': voter, 'votes': votes, 'notregistered': notregistered, 'eligible_p': eligible_p,
                           'can_feature_p': can_feature_p, 'election_url' : election_url, 
                           'vote_url': vote_url, 'election_badge_url' : election_badge_url,
-                          'show_result': show_result,
+                          'show_result': show_result, 'committee_login_p': committee_login_p,
                           'test_cookie_url': test_cookie_url})
 
 def test_cookie(request):
@@ -2154,5 +2155,4 @@ def optin_confirm(request, email, code):
         'message': f'The email address {email} has been successfully opted back in to Helios emails.',
         'email': email
     })
-
 

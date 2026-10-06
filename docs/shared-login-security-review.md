@@ -27,8 +27,10 @@ runtime-only npm audit reports zero advisories.
 
 Remaining practical limits:
 
-- Live browser login, real booth interaction, hosted HTTPS exchange, and Render
-  Docker startup remain deployment checks; local tests do not prove them.
+- Render Free Docker startup and the hosted HTTPS exchange were verified. An existing
+  Neon browser session opened Helios without another Google login, preserved the
+  organizer controls, and direct ballot confirmation returned 403 for the committee
+  account. A noncommittee student's live booth, casting and tally remain pending.
 - The bridge trusts Neon Auth and both servers plus the shared secret. This is a
   reviewed custom demo protocol, not an independent security audit.
 - Managed-session revocation after successful exchange takes up to five minutes

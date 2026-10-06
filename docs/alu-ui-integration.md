@@ -84,3 +84,31 @@ The demo supports one choice per seat and verified noncommittee students.
 Cohort-specific voter rules fail closed until authoritative student profiles
 exist; browser year/program fields are not voter eligibility. Free-host limits
 and the role-change/ballot-write race in the security review still apply.
+
+## Real nomination login and shared links
+
+The nomination and public ballot screens now load server-owned setup rather than
+localStorage. **Open nominations** persists setup in Neon, and **Publish
+nomination link** repairs an older browser-only record after it is connected.
+Preview candidates and ballots are not imported as authenticated submissions.
+
+Nomination sign-in uses the existing Neon Auth Google redirect. Each draft/save
+and submission validates a fresh server session and a verified `alustudent.com`
+address. Identity is never inferred from a name or accepted from the browser.
+Private drafts belong to the actual session subject; one final nomination per
+student is enforced through atomic version checks. Concurrent submission and
+closure cannot overwrite each other. Year/program and endorsements are
+self-reported facts for committee review, not verified voter eligibility.
+
+Authorized committee capabilities protect opening, closing, vetting, appeals and
+publication on the server. Reviewer IDs come from the session, and server-approved
+candidate decisions supply ballot freezing. Public projections exclude student
+email, endorsers, private attestations and unpublished submissions. Candidate
+setup/submissions now persist across browsers; unrelated planning/Q&A preview
+features have not all been migrated to a shared backend.
+
+Apply frontend migration `0015_helios_nominations.sql` before deploying this
+update. No Render change or new OAuth credentials are needed. Tests cover actual
+sign-in/nomination UI components with fixture transport plus server actions against
+isolated PostgreSQL, including forged local sessions, cross-account draft access,
+forged identity, duplicate/concurrent submission, phase closure and revoked roles.

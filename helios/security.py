@@ -43,7 +43,8 @@ def get_voter(request, user, election):
   """
   return the current voter
   """
-  if election.uuid in settings.ALU_BRIDGE_ELECTIONS:
+  from helios.bridge_eligibility import bridge_election
+  if bridge_election(election):
     from helios_auth.bridge_protocol import eligible_identity
     if (not user or user.user_type != 'alu' or
         request.session.get('alu_election') != election.uuid or
@@ -126,8 +127,9 @@ def election_view(**checks):
         raise Http404
 
       user = get_user(request)
+      from helios.bridge_eligibility import bridge_election
       if user and user.user_type == 'alu' and (
-          election.uuid not in settings.ALU_BRIDGE_ELECTIONS or
+          not bridge_election(election) or
           request.session.get('alu_election') != election.uuid):
         raise PermissionDenied()
 

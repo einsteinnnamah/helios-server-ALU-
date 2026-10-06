@@ -27,6 +27,13 @@ runtime-only npm audit reports zero advisories.
 
 Remaining practical limits:
 
+The UI integration and authenticated management API are reviewed in
+[ALU UI integration](alu-ui-integration.md). Creation uses fresh verified committee
+identity and capabilities, then grants ownership of the new draft only. Login
+never grants this ownership. Existing election updates require both current
+Neon capability checks and Helios's owner/admin check. Ciphertext handoff requires
+the configured Origin and schema, and explicit same-origin CSRF confirmation.
+
 - Render Free Docker startup and the hosted HTTPS exchange were verified. An existing
   Neon browser session opened Helios without another Google login, preserved the
   organizer controls, and direct ballot confirmation returned 403 for the committee

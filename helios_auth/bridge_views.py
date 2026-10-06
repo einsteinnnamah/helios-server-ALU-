@@ -28,9 +28,11 @@ def private_response(response):
 
 
 def allowed_election(election_id):
-  if 'alu' not in settings.AUTH_ENABLED_SYSTEMS or election_id not in settings.ALU_BRIDGE_ELECTIONS:
+  from helios.bridge_eligibility import bridge_election
+  election = Election.get_by_uuid(election_id)
+  if 'alu' not in settings.AUTH_ENABLED_SYSTEMS or not election or not bridge_election(election):
     return None
-  return Election.get_by_uuid(election_id)
+  return election
 
 
 @require_GET

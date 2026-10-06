@@ -8,7 +8,9 @@ from helios_auth.bridge_protocol import eligible_identity, https_origin
 
 
 def bridge_election(election):
-  return election.uuid in settings.ALU_BRIDGE_ELECTIONS
+  from helios.models import AluElectionBinding
+  return election.uuid in settings.ALU_BRIDGE_ELECTIONS or AluElectionBinding.objects.filter(
+    election=election, client_id=settings.ALU_BRIDGE_CLIENT_ID).exists()
 
 
 def statuses(election, voters):

@@ -1,5 +1,9 @@
 # ALU Helios shared-login demo on free hosting
 
+For the integrated creation, voting and receipt screens, see
+[ALU UI integration](alu-ui-integration.md). Apply its additional Neon migration
+before deploying the updated frontend.
+
 This is a small TEST election, not production or a 10,000-voter deployment.
 Use Render Free web + Free PostgreSQL and the existing Vercel Hobby frontend.
 Do not configure Google OAuth in Helios. Neon Auth remains the login provider.

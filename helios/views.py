@@ -681,7 +681,7 @@ def password_voter_login(request, election):
   """
   This is used to log in as a voter for a particular election
   """
-  if election.uuid in settings.ALU_BRIDGE_ELECTIONS:
+  if bridge_election(election):
     raise PermissionDenied()
   
   # the URL to send the user to after they've logged in
@@ -908,7 +908,10 @@ def one_election_cast_confirm(request, election):
     return_url = reverse(one_election_cast_confirm, args=[election.uuid])
     login_box = auth_views.login_box_raw(request, return_url=return_url, auth_systems = auth_systems)
 
-    return render_template(request, 'election_cast_confirm', {
+    alu_ui_p = request.session.get('alu_ui_election') == election.uuid and bridge_election(election)
+    from .alu_ui import return_url
+    return render_template(request, 'alu_cast_confirm' if alu_ui_p else 'election_cast_confirm', {
+        'alu_return_url': return_url(election) if alu_ui_p else None,
         'login_box': login_box, 'election' : election, 'vote_fingerprint': vote_fingerprint,
         'past_votes': past_votes, 'issues': issues, 'voter' : voter,
         'return_url': return_url,
@@ -962,6 +965,9 @@ def one_election_cast_done(request, election):
 
   if voter:
     votes = CastVote.get_by_voter(voter)
+    if request.session.get('alu_ui_election') == election.uuid and bridge_election(election) and votes:
+      from .alu_ui import return_url
+      return HttpResponseRedirect(return_url(election, votes[0].vote_hash))
     vote_hash = votes[0].vote_hash
     cv_url = get_castvote_url(votes[0])
 
@@ -1690,7 +1696,7 @@ def voters_upload(request, election):
   Upload a CSV of voters with
   voter_type, voter_id, optional_additional_params (e.g. email, name)
   """
-  if election.uuid in settings.ALU_BRIDGE_ELECTIONS:
+  if bridge_election(election):
     raise PermissionDenied()
 
   # don't allow voter upload when election is tallied
@@ -2155,4 +2161,3 @@ def optin_confirm(request, email, code):
         'message': f'The email address {email} has been successfully opted back in to Helios emails.',
         'email': email
     })
-

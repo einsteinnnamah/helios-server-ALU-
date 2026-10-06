@@ -32,6 +32,14 @@ class HeliosModel(models.Model, datatypes.LDObjectContainer):
   class Meta:
     abstract = True
 
+class AluElectionBinding(models.Model):
+  """Drafts created by the authenticated ALU management service, never by login."""
+  uuid = models.UUIDField(primary_key=True)
+  election = models.OneToOneField('Election', on_delete=models.PROTECT)
+  client_id = models.CharField(max_length=80)
+  created_at = models.DateTimeField(auto_now_add=True)
+
+
 class ElectionManager(models.Manager):
   """
   Custom manager that filters out soft-deleted elections by default.
@@ -332,7 +340,8 @@ class Election(HeliosModel):
     """
     if user.user_type == 'alu':
       from helios_auth.bridge_protocol import eligible_identity
-      if (self.uuid not in settings.ALU_BRIDGE_ELECTIONS or not eligible_identity({
+      from helios.bridge_eligibility import bridge_election
+      if (not bridge_election(self) or not eligible_identity({
           'subject': user.user_id, 'email': user.info.get('email'),
           'email_verified': user.info.get('email_verified')})):
         return False

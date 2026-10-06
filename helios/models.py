@@ -14,6 +14,7 @@ import uuid
 import bleach
 from django.conf import settings
 from django.db import models, transaction
+from django.utils.html import escape
 from validate_email import validate_email
 
 from helios import datatypes
@@ -329,6 +330,12 @@ class Election(HeliosModel):
     """
     Checks if a user is eligible for this election.
     """
+    if settings.ALU_STUDENT_DOMAIN:
+      from helios_auth.auth_systems.google import student_email_allowed
+      if (user.user_type != 'google' or
+          not student_email_allowed(user.info.get('email'), user.info.get('email_verified'))):
+        return False
+
     # registration closed, then eligibility doesn't come into play
     if not self.openreg:
       return False
@@ -368,6 +375,9 @@ class Election(HeliosModel):
 
   @property
   def pretty_eligibility(self):
+    if (settings.ALU_STUDENT_DOMAIN and self.openreg and
+        (self.eligibility is None or self.eligibility == [{'auth_system': 'google'}])):
+      return 'Only verified Google accounts at @%s can register to vote.' % escape(settings.ALU_STUDENT_DOMAIN)
     if not self.eligibility:
       return "Anyone can vote."
     else:
@@ -971,6 +981,8 @@ class Voter(HeliosModel):
   @classmethod
   @transaction.atomic
   def register_user_in_election(cls, user, election):
+    if settings.ALU_STUDENT_DOMAIN and not election.user_eligible_p(user):
+      raise ValueError('Only eligible verified student accounts may register.')
     # Check if user email is opted out
     user_email = user.user_id if user else None
     if user_email and EmailOptOut.is_opted_out(user_email):

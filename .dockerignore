@@ -1,0 +1,12 @@
+.git
+.venv
+venv*
+.env*
+env.sh
+.aws
+.agents
+.codex
+__pycache__
+*.pyc
+.cache
+.DS_Store

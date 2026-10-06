@@ -9,3 +9,6 @@ celerybeat-*
 env.sh
 .cache
 .idea/
+.env
+.env.*
+!.env.example

@@ -16,6 +16,7 @@ DEBUG = False
 AUTH_ENABLED_SYSTEMS = ['alu']
 AUTH_DEFAULT_SYSTEM = 'alu'
 HELIOS_ADMIN_ONLY = True
+HELIOS_VOTERS_UPLOAD = False
 if len(ALU_BRIDGE_SECRET.encode()) < 32:
   raise ImproperlyConfigured('ALU_BRIDGE_SECRET must contain at least 32 bytes.')
 from helios_auth.bridge_protocol import https_origin

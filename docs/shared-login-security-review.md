@@ -20,6 +20,8 @@ automatic voter registration, proof verification, closing and synchronous truste
 tallying. Only the managed Auth network session was a trusted fixture; no fake Auth
 schema was created in Neon. Clean frontend production build passed. Next.js runtime
 was patched from 16.3.4 to 16.3.8 following its dependency advisory.
+The transitive source-map-js runtime dependency was patched to 1.2.2; the final
+runtime-only npm audit reports zero advisories.
 
 Remaining practical limits:
 

@@ -291,6 +291,10 @@ AUTH_DEFAULT_SYSTEM = get_from_env('AUTH_DEFAULT_SYSTEM', get_from_env('AUTH_DEF
 GOOGLE_CLIENT_ID = get_from_env('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = get_from_env('GOOGLE_CLIENT_SECRET', '')
 ALU_STUDENT_DOMAIN = get_from_env('ALU_STUDENT_DOMAIN', '').strip().lower().lstrip('@')
+ALU_BRIDGE_APP_ORIGIN = get_from_env('ALU_BRIDGE_APP_ORIGIN', '')
+ALU_BRIDGE_SECRET = get_from_env('ALU_BRIDGE_SECRET', '')
+ALU_BRIDGE_CLIENT_ID = get_from_env('ALU_BRIDGE_CLIENT_ID', 'alu-helios-demo')
+ALU_BRIDGE_ELECTIONS = tuple(filter(None, get_from_env('ALU_BRIDGE_ELECTIONS', '').split(',')))
 
 # facebook
 FACEBOOK_APP_ID = get_from_env('FACEBOOK_APP_ID','')

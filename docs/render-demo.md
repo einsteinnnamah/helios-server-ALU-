@@ -1,129 +1,116 @@
-# ALU Helios demo on Render Free
+# ALU Helios shared-login demo on free hosting
 
-This is a small testing demo, not a production election or a 10,000-voter
-deployment. All changes are local until you authorize a commit, push, and deploy.
-Creating a Render Blueprint starts a deployment even with auto-deploy disabled.
+This is a small TEST election, not production or a 10,000-voter deployment.
+Use Render Free web + Free PostgreSQL and the existing Vercel Hobby frontend.
+Do not configure Google OAuth in Helios. Neon Auth remains the login provider.
 
-## Deployment, after authorization
+## Login and security
 
-1. Review these files, commit/push the approved changes to your existing GitHub
-   fork, then choose **New → Blueprint** in Render and select that fork/branch.
-2. Use `render.yaml`. Verify both `alu-helios-demo` and `alu-helios-demo-db` use
-   **Free** and the same region. If your workspace already has a Free PostgreSQL
-   database, reuse it and configure its internal connection string instead.
-3. Supply the Google web OAuth client ID and secret privately in Render. Never
-   put secrets in source control, screenshots, or chat. Render generates the two
-   application secrets and injects the database URL. Keep these secrets stable.
-4. The Docker image installs Python 3.13, locked Python dependencies, and LDAP
-   build libraries. Startup runs Django checks and migrations, then one Gunicorn
-   worker with a 180-second timeout. No worker or RabbitMQ service is required.
-5. Record the **actual** public URL from Render. `RENDER_EXTERNAL_HOSTNAME`
-   supplies exact allowed hosts and the HTTPS `URL_HOST`/`SECURE_URL_HOST`.
-   If using a custom domain, set `ALLOWED_HOSTS` to comma-separated hostnames and
-   `URL_HOST` to the canonical HTTPS origin. No trailing slash.
-6. Confirm `/`, `/booth/vote.html`, `/verifier/verify.html`, and a referenced
-   `/static/helios/` asset load over HTTPS. This fork serves booth, verifier, and
-   assets through explicit Django routes, including with `DEBUG=False`;
-   `collectstatic`/WhiteNoise are not required for this demo.
+The frontend `/helios` page links to each explicitly enabled election. Helios
+creates a signed, five-minute browser request bound to that election, its client,
+its exact callback, and a secret PKCE verifier in the Helios browser session.
+The frontend uses `auth.getSession` with cookie-cache bypass and requires a
+verified `alustudent.com` email and a live matching Neon user/session. Already
+signed-in students continue without another Google authentication. Signed-out
+students use the existing Neon Google sign-in, then resume the handoff.
 
-The existing eight-worker `Procfile` is bypassed by Docker's start command.
-`settings_render_demo` requires `HELIOS_DEMO_MODE=1`, disables debug and all login
-systems except Google, enables secure cookies/proxy handling, and uses eager
-Celery with propagated errors and a memory broker. Notification code uses a dummy
-email backend: no mail is sent or logged, and SMTP cannot break casting/tallying.
-You must save ballot trackers in the browser; there is no receipt email.
+A random 256-bit code lives at most 60 seconds. Neon stores only its SHA-256 hash,
+browser-request hash, bindings, and validated session identity. The authenticated
+HTTPS exchange atomically deletes the matching row and rechecks the managed
+user's current email verification and live session. Wrong state, verifier,
+client, election, expired or replayed codes fail. Helios also locks and consumes
+its browser request before exchange, rotates its session and CSRF token, checks
+student eligibility independently, and scopes voting access to the election.
+Codes travel in URL fragments and POST bodies, not query strings. Responses use
+no-store/no-referrer; application handlers do not log codes, cookies or secrets.
+Do not enable request-body/header logging in hosting or observability tools.
 
-The domain `alustudent.com` was found in the separate frontend's
-`src/lib/auth/access.ts` (`ALU_STUDENT_DOMAIN` default) and `src/lib/types.ts`.
-No local `.env` override was found. Helios checks the exact domain of Google's
-verified email on its server; a client-side check or Google's `hd` hint is not
-the authorization decision. Registration also rejects other authentication
-systems, unverified/stale identities, and other domains while the setting is on.
-Existing sessions predating this change should be logged out and reauthenticated.
+Voting access grants no committee/admin role. Existing Neon committee capability
+checks remain unchanged. Helios preserves existing `admin_p` and election-admin
+relationships for the same stable Neon user ID; it never links by email or grants
+roles at login. Existing committee roles in Next.js do not automatically imply
+Helios administration. An operator must explicitly authorize the appropriate
+Helios election administrator. Students without that grant cannot close or tally.
 
-## Google OAuth with the actual Render URL
+## Configure and deploy
 
-In Google Cloud's Google Auth Platform, configure the consent screen/audience,
-then create an OAuth client of type **Web application**. Use:
+1. Commit/push the reviewed changes in both repositories. In Render use
+   **New → Blueprint**, select the Helios fork/master and `render.yaml`.
+   Confirm `alu-helios-demo` and `alu-helios-demo-db` both show **Free** in
+   Frankfurt. Do not enable a disk, worker, broker or paid database.
+2. Set Render `ALU_BRIDGE_APP_ORIGIN=https://alu-election-app.vercel.app`.
+   Privately generate a random shared secret of at least 32 bytes and set the
+   SAME `ALU_BRIDGE_SECRET` in Render and the frontend's Vercel Production
+   environment. Keep it server-only; never use `NEXT_PUBLIC_` or commit it.
+   Render generates stable `SECRET_KEY` and `EMAIL_OPTOUT_SECRET` and supplies
+   the database URL. Do not reveal credentials in screenshots/chat.
+3. Record the actual Render public HTTPS URL. In Vercel Production set
+   `HELIOS_BASE_URL` to that origin, and ensure `APP_BASE_URL` is exactly
+   `https://alu-election-app.vercel.app`. Both services use
+   `ALU_BRIDGE_CLIENT_ID=alu-helios-demo`. Set `ALU_BRIDGE_ELECTIONS` on BOTH
+   services to the same comma-separated demo election UUIDs (no whitespace).
+   Empty allowlists deliberately disable bridge election access.
+4. Apply ONLY the new Neon bridge migration from the frontend root:
+   `node --env-file=.env scripts/migrate-helios-bridge.mjs`.
+   Use the existing correct Neon DATABASE_URL privately. This creates only
+   `helios_login_codes`; do not run unrelated pending migrations for this demo.
+5. Bootstrap a clearly named TEST election and explicitly authorized organizer
+   using `python manage.py setup_alu_demo --election-id <uuid>
+   --admin-subject <actual-Neon-user-id> --admin-email <verified-student-email>`.
+   Use Render's database through a private local environment if Free does not
+   offer a shell. Obtain the stable UUID from the managed Neon user record, not
+   the browser or an email-derived guess. Select an organizer already authorized
+   for election administration. This command is an explicit operator grant for
+   THIS election; ordinary bridge login never performs it. The election starts
+   as a draft with open registration, two choices, and a Helios trustee. Freeze
+   it in the authorized organizer UI after checking the configuration.
+6. Redeploy Vercel after environment changes, and deploy the latest Helios commit.
+   No changes to the existing Neon Google OAuth configuration are needed unless
+   the frontend origin itself changes. Never register Render as a Google callback.
+7. Check `/`, `/booth/vote.html`, `/verifier/verify.html`, and referenced static
+   assets over HTTPS. This fork serves these through Django routes; it does not
+   need WhiteNoise/collectstatic. Docker starts one Gunicorn worker, runs checks
+   and migrations, and uses eager Celery + memory transport. No SMTP is sent/logged.
 
-- Authorized JavaScript origin: `https://<actual-render-hostname>`
-- Authorized redirect URI: `https://<actual-render-hostname>/auth/after/`
+## Mock election verification
 
-The trailing slash on the redirect is required. Use the same project/client as
-the credentials in Render. For an external app in Testing, add your demo student
-accounts as test users where required by Google's consent configuration. An
-internal Workspace app requires authorization within that Workspace. Do not
-assume you can administer ALU's Workspace. The client requests only OpenID,
-email, and profile scopes. Save the configuration and retry a real student login.
+1. Sign in on the frontend as the authorized organizer, then open `/helios`.
+   Handoff should use the current Neon session without another Google prompt.
+   Verify questions, registration, trustee, and freeze the TEST election.
+2. In a separate browser session, sign in as a second verified student and enter
+   the same election. Encrypt a ballot in Helios's booth and confirm it. Helios
+   automatically creates the voter on ballot confirmation; there is no roster.
+   Repeated confirmation must not create duplicate voter records.
+3. Save the tracker, compare it with the published ballot fingerprint, and use
+   the linked verifier. An audited ballot is spoiled: encrypt a fresh ballot to
+   cast. Encryption, proofs, ballot verification and tallying are unchanged.
+4. Check a nonstudent/unverified account fails; a student cannot access tally/admin
+   endpoints; an explicitly authorized organizer retains their existing access.
+5. Organizer: compute encrypted tally (closes voting), combine decryptions, release
+   results and verify they match the known test votes. Confirm voting is closed.
+   Eager mode runs ballot processing and nested trustee decryption synchronously.
 
-## Complete mock election
+## Checks and remaining operational limits
 
-1. Open the service a few minutes before presenting and sign in with a verified
-   `@alustudent.com` Google account. The demo retains Helios's default permission
-   for authenticated users to create elections; the creator administers their
-   own election. Use a student organizer account for this demo.
-2. Create a clearly named **TEST** election. Use a public election for easy
-   auditing; encrypted choices remain private. Enable voter aliases if you want
-   aliases on public voter lists (this is separate from ballot secrecy).
-3. Add one question and two choices. Keep the automatically created Helios
-   trustee for this small test. In the voter list, select **open registration**
-   before freezing. Do not upload a roster. The eligibility summary should say
-   that only verified Google accounts at `@alustudent.com` can register.
-4. Freeze the election only after checking questions, trustees, and registration.
-   Keep open registration enabled while voting so new student accounts can join.
-5. In a separate browser session, sign in as a second student, open the election,
-   encrypt a choice in the booth, and confirm the ballot. Helios creates the voter
-   automatically on ballot confirmation, not immediately after a homepage login.
-   Confirm there is one voter entry and one verified cast ballot.
-6. Save the tracker. Open its ballot link and compare its fingerprint to the
-   receipt. Use the linked verifier to verify the encrypted ballot/election.
-   Optionally audit a separate trial ballot to check its plaintext/randomness;
-   an audited ballot is spoiled and must not be cast. Encrypt a fresh ballot.
-7. Try a nonstudent Google account in another session: it must fail login and
-   create neither a Helios user nor voter entry. Do not add it to the election.
-8. As the election creator, choose **compute encrypted tally** (this closes
-   voting), wait for the request to finish, then combine decryptions and release
-   results. With only the Helios trustee, its decryption/proofs run synchronously.
-   Check the result matches the known test choices and verify the tally using
-   Helios's verification tools. Confirm another vote cannot be cast after closing.
+Local Helios verification: 228 tests pass, including real encryption, registration,
+proof verification, eager casting/tallying and bridge browser security tests.
+Frontend security tests use production handlers and an isolated PostgreSQL database:
+replay, expiry, concurrent redemption, tampered signature, client/election/callback
+binding, ineligible identities, unauthenticated exchange, revocation and email change.
+Use Node 24 for the frontend test scripts. Run `node scripts/test-helios-bridge.mjs` with `BRIDGE_TEST_DATABASE_URL` pointing
+ONLY to the isolated local `bridge_test` fixture database; it creates mock managed
+Auth tables there, never in Neon. Run Helios tests with `settings_ci` and PostgreSQL.
+Live browser login/booth verification and Docker build must be checked separately.
 
-The default single Helios trustee makes this a demonstration of the workflow;
-independent trustees and a production security/operations review come later.
-Synchronous crypto blocks the only web worker during processing. Keep the demo
-small and do not redeploy/restart while casting or tallying.
+Helios bridge sessions last at most five minutes; Neon revocation after exchange
+can take that long to invalidate an existing Helios session. The shared secret
+and both app servers are trusted identity boundaries. This is a custom bridge,
+not an externally audited identity protocol. Rotate the secret on compromise;
+review managed Auth schema compatibility before upgrades. Expired codes are removed on subsequent authorization requests. The single Helios trustee is a demo setup.
+Synchronous crypto blocks the sole web worker: keep the election small and do not
+restart during casting/tallying. Existing custom CSRF checks are retained; this
+short demo does not enable HSTS. Save ballot trackers locally: there is no mail.
 
-## Verification
-
-With Python 3.13, `uv`, LDAP libraries, and local PostgreSQL running as configured
-in `settings_ci.py`:
-
-```sh
-uv sync --frozen
-uv run python manage.py test --settings=settings_ci -v 1
-uv run python manage.py test helios.test_render_demo --settings=settings_ci -v 2
-```
-
-The added integration test mocks only Google's network exchange. It exercises
-the auth callback, exact domain checks, automatic voter creation without a
-roster, real encrypted ballot/proof verification and storage through eager
-Celery, closing, nested eager trustee decryption, result combination and release.
-The existing complete-election tests additionally cover ballot casting/tallying.
-This does not replace a real browser OAuth/booth/verifier test on the deployed URL.
-
-Local verification completed with Python 3.13.16 and an isolated PostgreSQL 16
-database: **all 219 tests passed**, including the five demo tests and existing
-complete-election tests. Django's ordinary system check, Python/shell syntax,
-and whitespace checks passed. The demo `check --deploy` has two known warnings:
-Helios uses its existing custom CSRF checks instead of Django's CSRF middleware,
-and this temporary demo does not enable HSTS. The Docker image has not been built
-locally (Docker is unavailable), and live OAuth/browser verification awaits the
-authorized deployment and its actual URL.
-
-Render Free sleeps after 15 minutes without inbound traffic and can take about
-a minute to wake. Free PostgreSQL expires after 30 days; export anything needed
-before expiry. Free services have ephemeral disks and cannot send SMTP traffic
-on ports 25, 465, or 587. These limits are documented in
-[Render's Free guide](https://render.com/docs/free). Configuration follows the
-[Blueprint reference](https://render.com/docs/blueprint-spec) and
-[Render environment variables](https://render.com/docs/environment-variables).
-OAuth setup follows [Google's web-server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server).
+[Render Free](https://render.com/docs/free) sleeps after 15 idle minutes and its
+free PostgreSQL expires after 30 days. Keep anything needed before expiry. Disks
+are ephemeral. Configuration follows the [Blueprint reference](https://render.com/docs/blueprint-spec).

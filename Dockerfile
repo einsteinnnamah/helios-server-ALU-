@@ -1,7 +1,7 @@
 FROM ghcr.io/astral-sh/uv:0.12.23 AS uv
 FROM python:3.13-slim-bookworm
 
-# python-ldap is imported by this fork even when Google is the only login.
+# python-ldap is imported by this fork even when ALU is the only login.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libldap2-dev libsasl2-dev \
     && rm -rf /var/lib/apt/lists/*

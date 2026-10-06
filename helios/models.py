@@ -330,9 +330,15 @@ class Election(HeliosModel):
     """
     Checks if a user is eligible for this election.
     """
+    if user.user_type == 'alu':
+      from helios_auth.bridge_protocol import eligible_identity
+      if (self.uuid not in settings.ALU_BRIDGE_ELECTIONS or not eligible_identity({
+          'subject': user.user_id, 'email': user.info.get('email'),
+          'email_verified': user.info.get('email_verified')})):
+        return False
     if settings.ALU_STUDENT_DOMAIN:
       from helios_auth.auth_systems.google import student_email_allowed
-      if (user.user_type != 'google' or
+      if (user.user_type not in ('google', 'alu') or
           not student_email_allowed(user.info.get('email'), user.info.get('email_verified'))):
         return False
 
@@ -376,8 +382,8 @@ class Election(HeliosModel):
   @property
   def pretty_eligibility(self):
     if (settings.ALU_STUDENT_DOMAIN and self.openreg and
-        (self.eligibility is None or self.eligibility == [{'auth_system': 'google'}])):
-      return 'Only verified Google accounts at @%s can register to vote.' % escape(settings.ALU_STUDENT_DOMAIN)
+        (self.eligibility is None or self.eligibility in ([{'auth_system': 'google'}], [{'auth_system': 'alu'}]))):
+      return 'Only verified ALU accounts at @%s can register to vote.' % escape(settings.ALU_STUDENT_DOMAIN)
     if not self.eligibility:
       return "Anyone can vote."
     else:

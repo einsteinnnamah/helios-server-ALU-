@@ -114,6 +114,12 @@ def election_view(**checks):
       if not election:
         raise Http404
 
+      user = get_user(request)
+      if user and user.user_type == 'alu' and (
+          election.uuid not in settings.ALU_BRIDGE_ELECTIONS or
+          request.session.get('alu_election') != election.uuid):
+        raise PermissionDenied()
+
       # do checks
       do_election_checks(election, checks)
 

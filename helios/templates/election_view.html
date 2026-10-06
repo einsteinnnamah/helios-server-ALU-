@@ -88,6 +88,7 @@ this {{election.election_type}} is <u>not</u> featured on the front page.
 {% if admin_p %}
 &nbsp;&nbsp;|&nbsp;&nbsp;
 <a href="{% url "election@admins" election.uuid %}">administrators</a>
+ | <a href="/helios/elections/{{election.uuid}}/policy_reviews">ballot policy reviews</a>
 {% endif %}
 </p>
 

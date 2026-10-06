@@ -503,6 +503,8 @@ class Election(HeliosModel):
     """
     tally the election, assuming votes already verified
     """
+    from helios.bridge_eligibility import require_policy_decisions
+    require_policy_decisions(self)
     tally = self.init_tally()
     for voter in self.voter_set.exclude(vote=None):
       tally.add_vote(voter.vote, verify_p=False)
@@ -527,6 +529,8 @@ class Election(HeliosModel):
     """
     release the result that should already be computed
     """
+    from helios.bridge_eligibility import require_policy_decisions
+    require_policy_decisions(self)
     if not self.result:
       return
 
@@ -537,6 +541,8 @@ class Election(HeliosModel):
     combine all of the decryption results
     """
 
+    from helios.bridge_eligibility import require_policy_decisions
+    require_policy_decisions(self)
     # gather the decryption factors
     trustees = Trustee.get_by_election(self)
     decryption_factors = [t.decryption_factors for t in trustees]
@@ -1370,6 +1376,21 @@ class Trustee(HeliosModel):
     """
     # verify_decryption_proofs(self, decryption_factors, decryption_proofs, public_key, challenge_generator):
     return self.election.encrypted_tally.verify_decryption_proofs(self.decryption_factors, self.decryption_proofs, self.public_key, algs.EG_fiatshamir_challenge_generator)
+
+
+class BallotPolicyReview(models.Model):
+  election = models.ForeignKey(Election, on_delete=models.PROTECT)
+  voter = models.ForeignKey(Voter, on_delete=models.PROTECT)
+  event_key = models.CharField(max_length=40)
+  reason = models.CharField(max_length=250)
+  flagged_at = models.DateTimeField(auto_now_add=True)
+  decision = models.CharField(max_length=10, default='pending', choices=[('pending', 'Pending'), ('retain', 'Retain')])
+  decided_by = models.ForeignKey(User, null=True, on_delete=models.PROTECT)
+  decided_at = models.DateTimeField(null=True)
+  decision_reason = models.TextField(blank=True)
+
+  class Meta:
+    constraints = [models.UniqueConstraint(fields=['election', 'voter', 'event_key'], name='helios_policy_event_unique')]
 
 
 class EmailOptOut(models.Model):

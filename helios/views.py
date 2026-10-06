@@ -37,6 +37,7 @@ from .security import (election_view, election_admin,
                        user_can_admin_election, user_can_feature_election)
 from .view_utils import SUCCESS, FAILURE, return_json, render_template, render_template_raw
 from .workflows import homomorphic
+from .bridge_eligibility import require_voting_access, require_policy_decisions, refresh_policy_reviews
 
 # Parameters for everything
 ELGAMAL_PARAMS = elgamal.Cryptosystem()
@@ -666,6 +667,8 @@ def one_election_cast(request, election):
     return HttpResponseRedirect(settings.SECURE_URL_HOST + reverse(url_names.election.ELECTION_VIEW, args = [election.uuid]))
     
   user = get_user(request)
+  if user:
+    require_voting_access(request, election, user)
   encrypted_vote = request.POST['encrypted_vote']
 
   save_in_session_across_logouts(request, 'encrypted_vote', encrypted_vote)
@@ -809,6 +812,8 @@ def password_voter_resend(request, election):
 @election_view()
 def one_election_cast_confirm(request, election):
   user = get_user(request)    
+  if user:
+    require_voting_access(request, election, user)
 
   # if no encrypted vote, the user is reloading this page or otherwise getting here in a bad way
   if ('encrypted_vote' not in request.session) or request.session['encrypted_vote'] is None:
@@ -922,6 +927,9 @@ def one_election_cast_confirm(request, election):
     if not voter:
       return HttpResponseRedirect(settings.SECURE_URL_HOST + reverse(one_election_cast_confirm, args=[election.uuid]))
     
+    # Fresh check immediately before accepting the encrypted ballot. A previous
+    # code, session, registration or GET confirmation cannot bypass membership.
+    require_voting_access(request, election, user)
     # don't store the vote in the voter's data structure until verification
     cast_vote.save()
 
@@ -1253,6 +1261,7 @@ def one_election_register(request, election):
   check_csrf(request)
     
   user = get_user(request)
+  require_voting_access(request, election, user)
   voter = Voter.get_by_election_and_user(election, user)
   
   if not voter:
@@ -1306,6 +1315,7 @@ def one_election_compute_tally(request, election):
     return HttpResponseRedirect(settings.SECURE_URL_HOST + reverse(url_names.election.ELECTION_VIEW,args=[election.election_id]))
 
   num_pending_votes = election.num_pending_votes
+  require_policy_decisions(election)
 
   if request.method == "GET":
     return render_template(request, 'election_compute_tally', {
@@ -1331,6 +1341,32 @@ def one_election_compute_tally(request, election):
   tasks.election_compute_tally.delay(election_id = election.id)
 
   return HttpResponseRedirect(settings.SECURE_URL_HOST + reverse(url_names.election.ELECTION_VIEW,args=[election.uuid]))
+
+
+@election_admin()
+@require_http_methods(['GET', 'POST'])
+def one_election_policy_reviews(request, election):
+  from .models import BallotPolicyReview
+  if request.method == 'POST':
+    check_csrf(request)
+  refresh_policy_reviews(election)
+  if request.method == 'POST':
+    reason = request.POST.get('reason', '').strip()
+    if request.POST.get('decision') != 'retain' or not 10 <= len(reason) <= 2000:
+      return HttpResponseBadRequest('An explicit retain decision and policy reason are required.')
+    with transaction.atomic():
+      review = BallotPolicyReview.objects.select_for_update().filter(
+        election=election, id=request.POST.get('review_id'), decision='pending').first()
+      if not review:
+        return HttpResponseBadRequest('Review unavailable.')
+      review.decision = 'retain'
+      review.decided_by = get_user(request)
+      review.decided_at = datetime.datetime.utcnow()
+      review.decision_reason = reason
+      review.save()
+    return HttpResponseRedirect(f'/helios/elections/{election.uuid}/policy_reviews')
+  return render_template(request, 'election_policy_reviews', {'election': election,
+    'reviews': BallotPolicyReview.objects.filter(election=election).select_related('voter', 'decided_by')})
 
 @trustee_check
 def trustee_decrypt_and_prove(request, election, trustee):

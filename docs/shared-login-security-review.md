@@ -1,6 +1,6 @@
 # Shared-login bridge review
 
-Reviewed demo implementation: Helios `267c619`, Next.js `f26af8d`.
+Reviewed the shared-login implementation and committee-exclusion extension in both repositories. Base bridge: Helios `267c619`, Next.js `f26af8d`.
 
 | Threat | Enforced control | Validation |
 | --- | --- | --- |
@@ -11,9 +11,11 @@ Reviewed demo implementation: Helios `267c619`, Next.js `f26af8d`.
 | Open redirect | Exact configured HTTPS origins/callback; server-selected fixed local election return paths; redirect following disabled on exchange | Signed attacker callback rejected; client also checks fixed destination |
 | Unauthorized election access | Election/client/PKCE/state binding, explicit allowlists in both apps, independent Helios enrollment/private-election checks | Wrong-election redemption/view, closed registration, private enrollment, legacy password-voter sessions and roster uploads rejected |
 | Privilege escalation | No role inputs/claims in browser protocol; new Helios users have no admin flag; existing role checks remain server-side | Student tally request returns 403; existing explicit admin grant preserved; bootstrap grants one election only |
+| Committee voting exclusion | Server-selected access-only committee grants; current official-role membership checked at issuance, voter-code redemption, enrollment and immediately before casting; no browser eligibility inputs | Committee direct URLs and existing sessions denied; pre-appointment voter code rejected; fresh-check outage/tampered reply fails closed; existing admin grant preserved |
+| Membership after casting | Private trigger history survives revocation/reclassification; durable per-event policy review; pending reviews block tally, combination and release; explicit administrator retain decision with reason and actor | Verified ciphertext/proof/tracker retained; student cannot resolve; unsupported deletion rejected; model/task tally also blocked; later appointment creates another pending review |
 | Credential disclosure | Fragments plus POST bodies; no-store/no-referrer; no request/body/token exception logging; credentials only server environment; grant table RLS with no browser policies | Migration applied in Neon and no browser policies present; no secrets committed |
 
-229 Helios tests passed. 28 frontend security checks passed against isolated real
+234 Helios tests passed. 37 frontend security checks passed against isolated real
 PostgreSQL. A cross-language integration test used Python-signed requests and the
 production TypeScript authorization/exchange handlers, then real Helios encryption,
 automatic voter registration, proof verification, closing and synchronous trustee
@@ -30,9 +32,22 @@ Remaining practical limits:
 - The bridge trusts Neon Auth and both servers plus the shared secret. This is a
   reviewed custom demo protocol, not an independent security audit.
 - Managed-session revocation after successful exchange takes up to five minutes
-  to invalidate the Helios session. Committee role changes continue to follow
-  each application's server-side role checks; the bridge does not synchronize
+  to invalidate the Helios session. Committee membership and current verified
+  student status are checked fresh for every ballot; the bridge does not synchronize
   or automatically grant Helios administrator roles.
+- Membership reads in Neon and ballot writes in Helios are not one distributed
+  transaction. A simultaneous role grant can race the final check; subsequent
+  policy checks flag current membership conflicts and recorded post-cast grants.
+  Historical grant/cast comparisons depend on provider UTC clocks. A production
+  election needs role freezing or a coordinated authorization/commit protocol.
+- Policy reviews are discovered during voting denial, explicit administrator
+  review, tallying, combination and release, not proactively by a worker.
+  Changes after publication require a governance decision; published results are
+  never silently rewritten. This demo supports explicit retention only; any
+  exclusion must be separately specified and reviewed.
+- Committee means active `role_assignments` joined to `roles.is_official` using
+  the existing back-office admission definition, including observers and trustees.
+  The bridge does not change Neon role assignment or capability checks.
 - Browser XSS or compromised app/deployment credentials defeats the corresponding
   identity boundary. Do not enable request-body/header capture in hosting logs.
 - One free web worker and synchronous cryptography limit availability. Session

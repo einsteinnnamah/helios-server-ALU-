@@ -40,6 +40,28 @@ class BridgeTests(TestCase):
     self.override = override_settings(ALU_BRIDGE_ELECTIONS=(self.election.uuid,))
     self.override.enable()
     self.addCleanup(self.override.disable)
+    self.committee_subjects = set()
+    self.policy_events = {}
+    self.cross_language_status = False
+    def fresh_status(url, **kwargs):
+      payload = kwargs['json']
+      if self.cross_language_status:
+        data = self.fixture_call({'action': 'eligibility',
+          'authorization': kwargs['headers']['Authorization'], 'grant': payload})
+        result = Mock(status_code=data['status'])
+        result.json.return_value = data['data']
+        return result
+      result = Mock(status_code=200)
+      result.json.return_value = {'binding': {'client_id': payload['client_id'],
+        'election_id': payload['election_id']}, 'voters': [
+        {'subject': v['subject'], 'student': True,
+         'committee': v['subject'] in self.committee_subjects,
+         'events': self.policy_events.get(v['subject'], []) if v['cast_at'] else []}
+        for v in payload['voters']]}
+      return result
+    self.status_patch = patch('helios.bridge_eligibility.requests.post', side_effect=fresh_status)
+    self.status_patch.start()
+    self.addCleanup(self.status_patch.stop)
 
   def begin(self, client=None):
     client = client or self.client
@@ -50,14 +72,14 @@ class BridgeTests(TestCase):
     return client.session['alu_pending']
 
   def finish(self, pending, subject='student', email='student@alustudent.com', verified=True,
-             client=None, binding=None, expiry=None, code=None):
+             client=None, binding=None, expiry=None, code=None, access_kind='voter'):
     client = client or self.client
     result = Mock(status_code=200)
     result.json.return_value = {'identity': {'subject': subject, 'email': email,
       'email_verified': verified, 'name': 'Student'}, 'binding': binding or {
       'client_id': 'alu-helios-demo', 'election_id': self.election.uuid,
       'state': pending['state'], 'code_challenge': challenge(pending['verifier'])},
-      'session_expires_at': expiry or time.time() + 290}
+      'session_expires_at': expiry or time.time() + 290, 'access_kind': access_kind}
     with patch('helios_auth.bridge_views.requests.post', return_value=result) as post:
       response = client.post('/auth/alu/complete/', {'code': code or secrets.token_urlsafe(32),
         'state': pending['state'], 'csrf_token': client.session['csrf_token']},
@@ -81,12 +103,107 @@ class BridgeTests(TestCase):
     post.assert_not_called()
 
   def test_existing_authorized_admin_preserved(self):
-    result, _ = self.finish(self.begin(), subject='organizer', email='organizer@alustudent.com')
+    result, _ = self.finish(self.begin(), subject='organizer', email='organizer@alustudent.com', access_kind='committee')
     self.assertEqual(result.status_code, 200)
     self.admin.refresh_from_db()
     self.assertTrue(self.admin.admin_p)
     self.assertTrue(views.user_can_admin_election(self.admin, self.election))
     self.assertEqual(self.client.get(f'/helios/elections/{self.election.uuid}/voters/upload').status_code, 403)
+    self.assertEqual(self.client.get(f'/helios/elections/{self.election.uuid}/view').status_code, 200)
+    self.assertEqual(self.client.post(f'/helios/elections/{self.election.uuid}/cast',
+      {'encrypted_vote': 'ignored'}).status_code, 403)
+
+  def test_committee_code_cannot_enroll_or_grant_admin(self):
+    result, _ = self.finish(self.begin(), access_kind='committee')
+    self.assertEqual(result.status_code, 403)
+    self.assertFalse(User.objects.filter(user_id='student').exists())
+    self.assertEqual(self.election.voter_set.count(), 0)
+
+  def test_role_change_blocks_existing_session_direct_urls_and_registration(self):
+    self.finish(self.begin())
+    self.committee_subjects.add('student')
+    base = f'/helios/elections/{self.election.uuid}'
+    for path, body in [('/cast', {'encrypted_vote': 'ignored'}),
+                       ('/register', {'csrf_token': self.client.session['csrf_token']}),
+                       ('/cast_confirm', {'csrf_token': self.client.session['csrf_token']})]:
+      self.assertEqual(self.client.post(base + path, body).status_code, 403)
+    self.assertEqual(self.client.get(base + '/cast_confirm').status_code, 403)
+    self.assertEqual(self.election.voter_set.count(), 0)
+    self.assertEqual(models.CastVote.objects.count(), 0)
+    self.assertIn('user', self.client.session)
+
+  def test_fresh_membership_failure_and_forged_reply_fail_closed(self):
+    self.finish(self.begin())
+    base = f'/helios/elections/{self.election.uuid}'
+    for response in [Mock(status_code=503), Mock(status_code=200)]:
+      response.json.return_value = {'binding': {}, 'voters': []}
+      with patch('helios.bridge_eligibility.requests.post', return_value=response):
+        self.assertEqual(self.client.post(base + '/cast', {'encrypted_vote': 'ignored'}).status_code, 403)
+
+  def prepare_encrypted_ballot(self):
+    election = self.election
+    election.questions = [{'answer_urls':[None,None], 'answers':['Alice','Bob'],
+      'choice_type':'approval', 'max':1, 'min':0, 'question':'President?',
+      'result_type':'absolute', 'short_name':'President', 'tally_type':'homomorphic'}]
+    election.generate_trustee(views.ELGAMAL_PARAMS)
+    election.save()
+    election.freeze()
+    self.finish(self.begin())
+    vote = homomorphic.EncryptedVote.fromElectionAndAnswers(election, [[1]])
+    base = f'/helios/elections/{election.uuid}'
+    self.assertEqual(self.client.post(base+'/cast', {'encrypted_vote':vote.ld_object.serialize()}).status_code, 302)
+    self.assertEqual(self.client.get(base+'/cast_confirm').status_code, 200)
+    return base
+
+  def test_committee_change_between_confirmation_and_acceptance_blocks_ballot(self):
+    base = self.prepare_encrypted_ballot()
+    self.committee_subjects.add('student')
+    self.assertEqual(self.client.post(base+'/cast_confirm',
+      {'csrf_token':self.client.session['csrf_token']}).status_code, 403)
+    self.assertEqual(models.CastVote.objects.count(), 0)
+    self.assertIsNone(self.election.voter_set.get().vote)
+
+  def test_membership_after_ballot_is_flagged_preserved_and_requires_policy(self):
+    base = self.prepare_encrypted_ballot()
+    self.assertEqual(self.client.post(base+'/cast_confirm',
+      {'csrf_token':self.client.session['csrf_token']}).status_code, 302)
+    cast = models.CastVote.objects.get()
+    original_vote = cast.vote.ld_object.serialize()
+    self.committee_subjects.add('student')
+    self.policy_events['student'] = ['123']
+    self.assertEqual(self.client.post(base+'/cast', {'encrypted_vote':'ignored'}).status_code, 403)
+    review = models.BallotPolicyReview.objects.get()
+    self.assertEqual(review.decision, 'pending')
+    cast.refresh_from_db()
+    self.assertIsNotNone(cast.verified_at)
+    self.assertIsNone(cast.invalidated_at)
+    self.assertEqual(cast.vote.ld_object.serialize(), original_vote)
+    self.assertEqual(self.client.post(base+'/policy_reviews', {'decision':'retain',
+      'review_id':review.id, 'reason':'Student cannot decide this',
+      'csrf_token':self.client.session['csrf_token']}).status_code, 403)
+    self.client = Client()
+    self.finish(self.begin(), subject='organizer', email='organizer@alustudent.com', access_kind='committee')
+    token = self.client.session['csrf_token']
+    self.assertContains(self.client.get(base+'/policy_reviews'), 'Pending reviews block tallying')
+    self.assertEqual(self.client.post(base+'/compute_tally', {'csrf_token':token}).status_code, 403)
+    from django.core.exceptions import PermissionDenied
+    with self.assertRaises(PermissionDenied):
+      self.election.compute_tally()
+    self.assertEqual(self.client.post(base+'/policy_reviews', {'decision':'delete',
+      'review_id':review.id, 'reason':'Never silently delete', 'csrf_token':token}).status_code, 400)
+    self.assertEqual(self.client.post(base+'/policy_reviews', {'decision':'retain',
+      'review_id':review.id, 'reason':'Policy retains votes cast before appointment', 'csrf_token':token}).status_code, 302)
+    review.refresh_from_db()
+    self.assertEqual(review.decided_by, self.admin)
+    self.assertEqual(review.decision, 'retain')
+    # Revocation cannot erase the historical transition or its decision.
+    self.committee_subjects.clear()
+    self.assertEqual(self.client.post(base+'/compute_tally', {'csrf_token':token}).status_code, 302)
+    self.assertEqual(models.CastVote.objects.count(), 1)
+    # A later, distinct appointment requires another explicit decision.
+    self.policy_events['student'].append('124')
+    self.client.get(base+'/policy_reviews')
+    self.assertEqual(models.BallotPolicyReview.objects.filter(decision='pending').count(), 1)
 
   def test_operator_bootstrap_grants_only_one_election(self):
     election_id, subject = str(uuid.uuid4()), str(uuid.uuid4())
@@ -177,6 +294,7 @@ class BridgeTests(TestCase):
   def test_auto_registration_encrypted_ballot_verification_and_eager_tally(self):
     if os.environ.get('BRIDGE_TEST_DATABASE_URL'):
       self.finish = self.cross_language_finish
+      self.cross_language_status = True
     election = self.election
     election.questions = [{'answer_urls':[None,None], 'answers':['Alice','Bob'],
       'choice_type':'approval', 'max':1, 'min':0, 'question':'President?',
@@ -217,15 +335,7 @@ class BridgeTests(TestCase):
   def cross_language_finish(self, pending, subject='student', email='student@alustudent.com'):
     from django.conf import settings
     from helios_auth.bridge_protocol import sign_request
-    config = {'secret': settings.ALU_BRIDGE_SECRET, 'clientId': settings.ALU_BRIDGE_CLIENT_ID,
-      'appOrigin': settings.ALU_BRIDGE_APP_ORIGIN, 'heliosOrigin': settings.SECURE_URL_HOST,
-      'elections': [self.election.uuid]}
-    fixture = Path(__file__).resolve().parents[2] / 'ALU_Election_App/scripts/helios-bridge-fixture.mjs'
-    def call(data):
-      data['config'] = config
-      result = subprocess.run(['node', str(fixture)], input=json.dumps(data),
-        text=True, capture_output=True, check=True, timeout=15)
-      return json.loads(result.stdout)
+    call = self.fixture_call
     signed = sign_request({'v': 1, 'client_id': settings.ALU_BRIDGE_CLIENT_ID,
       'election_id': self.election.uuid, 'state': pending['state'],
       'code_challenge': challenge(pending['verifier']),
@@ -247,3 +357,13 @@ class BridgeTests(TestCase):
                   'grant': post.call_args.kwargs['json']})
     self.assertEqual(replay['status'], 400)
     return response, post
+
+  def fixture_call(self, data):
+    from django.conf import settings
+    data['config'] = {'secret': settings.ALU_BRIDGE_SECRET, 'clientId': settings.ALU_BRIDGE_CLIENT_ID,
+      'appOrigin': settings.ALU_BRIDGE_APP_ORIGIN, 'heliosOrigin': settings.SECURE_URL_HOST,
+      'elections': [self.election.uuid]}
+    fixture = Path(__file__).resolve().parents[2] / 'ALU_Election_App/scripts/helios-bridge-fixture.mjs'
+    result = subprocess.run(['node', str(fixture)], input=json.dumps(data),
+      text=True, capture_output=True, check=True, timeout=15)
+    return json.loads(result.stdout)

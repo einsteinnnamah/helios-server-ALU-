@@ -10,6 +10,7 @@ from helios import views
 from helios import election_url_names as names
 
 urlpatterns = [
+    path('/policy_reviews', views.one_election_policy_reviews),
     # election data that is cryptographically verified
     path('', views.one_election, name=names.ELECTION_HOME),
 

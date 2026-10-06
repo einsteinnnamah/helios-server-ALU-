@@ -110,7 +110,8 @@ def complete(request):
     identity = data['identity']
     binding = data['binding']
     expiry = data['session_expires_at']
-    if (not eligible_identity(identity) or binding != {
+    access_kind = data['access_kind']
+    if (access_kind not in ('voter', 'committee') or not eligible_identity(identity) or binding != {
         'client_id': settings.ALU_BRIDGE_CLIENT_ID, 'election_id': election_id,
         'state': state, 'code_challenge': challenge(pending['verifier'])} or
         not isinstance(expiry, (int, float)) or not time.time() < expiry <= time.time() + 305):
@@ -129,6 +130,10 @@ def complete(request):
     existing = None
   registered = Voter.get_by_election_and_user(election, existing) if existing else None
   administrator = user_can_admin_election(existing, election)
+  # Committee codes authenticate only an existing authorized administrator.
+  # They cannot enroll a voter or manufacture an administrator grant.
+  if access_kind == 'committee' and not administrator:
+    return private_response(HttpResponseForbidden('Committee access requires an existing election permission.'))
   if ((election.private_p and not (registered or administrator)) or
       not (registered or administrator or election.user_eligible_p(candidate))):
     return private_response(HttpResponseForbidden('Not eligible for this election.'))
@@ -139,6 +144,7 @@ def complete(request):
   request.session['user'] = {'type': 'alu', 'user_id': user.user_id}
   request.session['alu_election'] = election_id
   request.session['alu_session_expires_at'] = expiry
+  request.session['alu_access_kind'] = access_kind
   request.session['csrf_token'] = secrets.token_urlsafe(32)
   request.session.pop('CURRENT_VOTER_ID', None)
   return private_response(JsonResponse({'redirect': pending['return_path']}))

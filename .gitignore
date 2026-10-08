@@ -12,3 +12,4 @@ env.sh
 .env
 .env.*
 !.env.example
+.local-testing/

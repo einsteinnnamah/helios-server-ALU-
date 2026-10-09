@@ -32,6 +32,13 @@ class HeliosModel(models.Model, datatypes.LDObjectContainer):
   class Meta:
     abstract = True
 
+class AluRateBucket(models.Model):
+  """Shared bounded request counters. Identity is hashed, never stored in clear."""
+  key = models.CharField(max_length=85, primary_key=True)
+  hits = models.PositiveSmallIntegerField()
+  expires_at = models.DateTimeField(db_index=True)
+
+
 class AluElectionBinding(models.Model):
   """Drafts created by the authenticated ALU management service, never by login."""
   uuid = models.UUIDField(primary_key=True)
@@ -626,10 +633,16 @@ class Election(HeliosModel):
     self.eligibility = [{'auth_system': auth_system} for auth_system in auth_systems]
     self.save()
 
+  @transaction.atomic
   def freeze(self):
     """
     election is frozen when the voter registration, questions, and trustees are finalized
     """
+    binding = AluElectionBinding.objects.select_for_update().filter(election=self).first()
+    if binding:
+      self.refresh_from_db(fields=['frozen_at'])
+      if self.frozen_at:
+        return
     if len(self.issues_before_freeze) > 0:
       raise Exception("cannot freeze an election that has issues")
 

@@ -30,6 +30,9 @@ from helios.security import get_voter
   EMAIL_BACKEND='django.core.mail.backends.dummy.EmailBackend')
 class BridgeTests(TestCase):
   def setUp(self):
+    # Isolate process-cache rate counters between independent test identities.
+    from django.core.cache import cache
+    cache.clear()
     self.admin = User.objects.create(user_type='alu', user_id='organizer', admin_p=True,
       info={'email': 'organizer@alustudent.com', 'email_verified': True})
     self.election, _ = models.Election.get_or_create(short_name='bridge-test',

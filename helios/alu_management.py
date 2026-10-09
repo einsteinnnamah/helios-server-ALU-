@@ -31,6 +31,8 @@ def management_identity(data):
             'election_id': data['election_id'], 'operation': data['operation']},
       timeout=15, allow_redirects=False)
     result = response.json()
+    if not isinstance(result, dict):
+      raise ValueError()
     if (response.status_code != 200 or result.get('authorized') is not True or
         result.get('binding') != {key: data[key] for key in ('subject', 'election_id', 'operation')} or
         not eligible_identity(result.get('identity')) or result['identity']['subject'] != data['subject']):
@@ -53,6 +55,8 @@ def questions(data):
   result = []
   titles = set()
   for seat in seats:
+    if not isinstance(seat, dict):
+      raise ValueError()
     title = text(seat['title'], 200)
     names = seat['answers']
     if title in titles or not isinstance(names, list) or not 1 <= len(names) <= 30:
@@ -82,7 +86,17 @@ def manage(request):
   try:
     if len(request.body) > 65536:
       raise ValueError()
-    data = json.loads(request.body)
+    def unique_object(pairs):
+      result = dict(pairs)
+      if len(result) != len(pairs):
+        raise ValueError()
+      return result
+    data = json.loads(request.body, object_pairs_hook=unique_object)
+    if not isinstance(data, dict):
+      raise ValueError()
+    text(data.get('subject'), 100)
+    text(data.get('operation'), 20)
+    text(data.get('election_id'), 36)
     if data['client_id'] != settings.ALU_BRIDGE_CLIENT_ID:
       raise ValueError()
     election_id = str(uuid.UUID(data['election_id']))
@@ -143,6 +157,14 @@ def manage(request):
         election.save()
         election.append_log('Approved ALU ballot synchronized by ' + actor.user_id)
       elif operation != 'create':
+        # Reject out-of-order operations before native handlers or expensive work.
+        if operation in ('tally', 'combine', 'release') and not election.frozen_at:
+          raise PermissionDenied('Freeze the approved ballot before tallying.')
+        if operation == 'combine' and (election.encrypted_tally is None or
+            (election.result is None and not election.ready_for_decryption_combination())):
+          raise PermissionDenied('Verified decryption contributions are not ready.')
+        if operation == 'release' and election.result is None:
+          raise PermissionDenied('Compute and verify the result before publication.')
         # Delegate to the existing protected Helios workflow. This server request
         # already has Bearer authentication AND a fresh independent capability
         # check, equivalent to API CSRF protection; no browser identity is used.
@@ -168,5 +190,7 @@ def manage(request):
       return private_response(JsonResponse({'election_id': election_id,
         'frozen': bool(election.frozen_at), 'closed': bool(election.voting_has_stopped()),
         'released': bool(election.result_released_at), 'setup_digest': setup_digest(election)}))
-  except (ValueError, KeyError, TypeError):
+  except PermissionDenied:
+    return private_response(HttpResponse('Election action refused', status=403))
+  except (ValueError, KeyError, TypeError, RecursionError):
     return private_response(HttpResponse('Invalid election setup request', status=400))

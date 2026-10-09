@@ -11,3 +11,12 @@ __pycache__
 .cache
 .DS_Store
 media
+
+# Local validation and test suites are not production runtime files.
+.local-testing
+**/test.py
+**/tests.py
+**/test_*.py
+**/tests/
+settings_ci.py
+docs

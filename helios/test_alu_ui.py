@@ -131,12 +131,31 @@ class AluUiTests(test_bridge.BridgeTests):
         'subject': subject, 'operation': operation, **payload}), content_type='application/json',
         HTTP_AUTHORIZATION='Bearer ' + settings.ALU_BRIDGE_SECRET)
 
+  def test_malformed_management_inputs_fail_before_network(self):
+    headers = {'HTTP_AUTHORIZATION': 'Bearer ' + settings.ALU_BRIDGE_SECRET}
+    base = {'client_id': settings.ALU_BRIDGE_CLIENT_ID, 'election_id': str(uuid.uuid4()),
+            'subject': 'new-chair', 'operation': 'create', 'name': 'TEST malformed'}
+    bodies = ['[]', 'null', 'true', '[' * 1100 + '0' + ']' * 1100,
+              json.dumps({**base, 'subject': ['forged']}),
+              json.dumps({**base, 'operation': {'create': True}}),
+              json.dumps(base)[:-1] + ',"subject":"substituted"}']
+    with patch('helios.alu_management.requests.post') as network:
+      for body in bodies:
+        with self.subTest(body_type=body[:20]):
+          response = self.client.post('/helios/alu/manage', body,
+            content_type='application/json', **headers)
+          self.assertEqual(response.status_code, 400)
+          self.assertEqual(response['Cache-Control'], 'no-store')
+      network.assert_not_called()
+
   def test_creation_and_ballot_freeze_preserve_permissions_and_crypto(self):
     election_id = str(uuid.uuid4())
     self.assertEqual(self.client.post('/helios/alu/manage', 'invalid',
       content_type='application/json').status_code, 401)
     created = self.management('create', election_id, name='TEST from existing creation UI')
     self.assertEqual(created.status_code, 200)
+    for premature in ('tally', 'combine', 'release'):
+      self.assertEqual(self.management(premature, election_id).status_code, 403)
     self.assertEqual(self.management('create', election_id, name='Replay').status_code, 200)
     self.assertEqual(models.Election.objects.filter(uuid=election_id).count(), 1)
     owner = models.User.objects.get(user_id='new-chair')
@@ -153,6 +172,8 @@ class AluUiTests(test_bridge.BridgeTests):
     frozen = self.management('freeze', election_id, setup_digest=synced.json()['setup_digest'])
     self.assertEqual(frozen.status_code, 200)
     self.assertTrue(frozen.json()['frozen'])
+    for premature in ('combine', 'release'):
+      self.assertEqual(self.management(premature, election_id).status_code, 403)
     self.assertEqual(self.management('ballot', election_id, name='Attack',
       seats=[{'title':'President', 'answers':['Replacement']}]).status_code, 403)
     self.assertEqual(self.client.get(f'/helios/elections/{election_id}/ui/ballot').status_code, 200)

@@ -594,7 +594,7 @@ Helios
 
   utils.send_email(settings.SERVER_EMAIL, ["%s <%s>" % (trustee.name, trustee.email)], 'your trustee homepage for %s' % election.name, body)
 
-  logging.info("URL %s " % url)
+  # This URL contains a trustee credential; never write it to logs.
   return HttpResponseRedirect(settings.SECURE_URL_HOST + reverse(url_names.election.ELECTION_TRUSTEES_VIEW, args = [election.uuid]))
 
 @trustee_check

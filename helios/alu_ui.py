@@ -107,7 +107,7 @@ def submit(request, election):
     raise PermissionDenied('Invalid encrypted ballot.')
   try:
     ciphertext_only(request.POST['encrypted_vote'], election)
-  except (ValueError, KeyError, TypeError):
+  except (ValueError, KeyError, TypeError, RecursionError):
     raise PermissionDenied('Invalid encrypted ballot.') from None
   from helios.views import one_election_cast
   save_in_session_across_logouts(request, 'alu_ui_election', election.uuid)

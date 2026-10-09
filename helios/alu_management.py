@@ -143,6 +143,14 @@ def manage(request):
         election.save()
         election.append_log('Approved ALU ballot synchronized by ' + actor.user_id)
       elif operation != 'create':
+        # Reject out-of-order operations before native handlers or expensive work.
+        if operation in ('tally', 'combine', 'release') and not election.frozen_at:
+          raise PermissionDenied('Freeze the approved ballot before tallying.')
+        if operation == 'combine' and (election.encrypted_tally is None or
+            (election.result is None and not election.ready_for_decryption_combination())):
+          raise PermissionDenied('Verified decryption contributions are not ready.')
+        if operation == 'release' and election.result is None:
+          raise PermissionDenied('Compute and verify the result before publication.')
         # Delegate to the existing protected Helios workflow. This server request
         # already has Bearer authentication AND a fresh independent capability
         # check, equivalent to API CSRF protection; no browser identity is used.
@@ -168,5 +176,7 @@ def manage(request):
       return private_response(JsonResponse({'election_id': election_id,
         'frozen': bool(election.frozen_at), 'closed': bool(election.voting_has_stopped()),
         'released': bool(election.result_released_at), 'setup_digest': setup_digest(election)}))
+  except PermissionDenied:
+    return private_response(HttpResponse('Election action refused', status=403))
   except (ValueError, KeyError, TypeError):
     return private_response(HttpResponse('Invalid election setup request', status=400))

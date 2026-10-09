@@ -137,6 +137,8 @@ class AluUiTests(test_bridge.BridgeTests):
       content_type='application/json').status_code, 401)
     created = self.management('create', election_id, name='TEST from existing creation UI')
     self.assertEqual(created.status_code, 200)
+    for premature in ('tally', 'combine', 'release'):
+      self.assertEqual(self.management(premature, election_id).status_code, 403)
     self.assertEqual(self.management('create', election_id, name='Replay').status_code, 200)
     self.assertEqual(models.Election.objects.filter(uuid=election_id).count(), 1)
     owner = models.User.objects.get(user_id='new-chair')
@@ -153,6 +155,8 @@ class AluUiTests(test_bridge.BridgeTests):
     frozen = self.management('freeze', election_id, setup_digest=synced.json()['setup_digest'])
     self.assertEqual(frozen.status_code, 200)
     self.assertTrue(frozen.json()['frozen'])
+    for premature in ('combine', 'release'):
+      self.assertEqual(self.management(premature, election_id).status_code, 403)
     self.assertEqual(self.management('ballot', election_id, name='Attack',
       seats=[{'title':'President', 'answers':['Replacement']}]).status_code, 403)
     self.assertEqual(self.client.get(f'/helios/elections/{election_id}/ui/ballot').status_code, 200)

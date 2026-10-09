@@ -173,6 +173,7 @@ MIDDLEWARE = [
 
     'django.middleware.common.CommonMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'helios.alu_guardrails.AluRequestGuardrails',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
 ]
 
@@ -376,3 +377,7 @@ AUTH_LDAP_USER_ATTR_MAP = {
 AUTH_LDAP_BIND_AS_AUTHENTICATING_USER = True
 
 AUTH_LDAP_ALWAYS_UPDATE_USER = False
+
+# Bound request parsing before expensive ballot/proof work.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 2 * 1024 * 1024
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 100

@@ -32,6 +32,13 @@ class HeliosModel(models.Model, datatypes.LDObjectContainer):
   class Meta:
     abstract = True
 
+class AluRateBucket(models.Model):
+  """Shared bounded request counters. Identity is hashed, never stored in clear."""
+  key = models.CharField(max_length=85, primary_key=True)
+  hits = models.PositiveSmallIntegerField()
+  expires_at = models.DateTimeField(db_index=True)
+
+
 class AluElectionBinding(models.Model):
   """Drafts created by the authenticated ALU management service, never by login."""
   uuid = models.UUIDField(primary_key=True)

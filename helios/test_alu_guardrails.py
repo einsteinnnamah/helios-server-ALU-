@@ -1,12 +1,15 @@
-from django.test import SimpleTestCase, RequestFactory
-from django.core.cache import cache
+from django.test import TransactionTestCase, RequestFactory
+from django.db import connections, close_old_connections, DatabaseError
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
+from helios.models import AluRateBucket
 from django.http import HttpResponse
 from helios.alu_guardrails import AluRequestGuardrails
 
 
-class AluGuardrailTests(SimpleTestCase):
+class AluGuardrailTests(TransactionTestCase):
     def setUp(self):
-        cache.clear()
+        AluRateBucket.objects.all().delete()
         self.factory = RequestFactory()
         self.middleware = AluRequestGuardrails(lambda request: HttpResponse('ok'))
 
@@ -35,3 +38,30 @@ class AluGuardrailTests(SimpleTestCase):
     def test_reading_receipts_is_not_throttled(self):
         for _ in range(25):
             self.assertEqual(self.middleware(self.factory.get('/helios/elections/test/ui/receipt/tracker')).status_code, 200)
+
+    def test_concurrent_workers_share_one_atomic_limit(self):
+        def attempt(_):
+            close_old_connections()
+            try:
+                middleware = AluRequestGuardrails(lambda request: HttpResponse('ok'))
+                return middleware(self.request()).status_code
+            finally:
+                connections.close_all()
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            statuses = list(pool.map(attempt, range(32)))
+        self.assertEqual(statuses.count(200), 20)
+        self.assertEqual(statuses.count(429), 12)
+        self.assertEqual(AluRateBucket.objects.get().hits, 20)
+
+    def test_database_failure_is_closed(self):
+        with patch('helios.alu_guardrails.connection.cursor', side_effect=DatabaseError):
+            self.assertEqual(self.middleware(self.request()).status_code, 503)
+
+    def test_expired_buckets_are_cleaned_without_identity_storage(self):
+        from django.utils import timezone
+        import datetime
+        AluRateBucket.objects.create(key='expired', hits=1,
+            expires_at=timezone.now()-datetime.timedelta(minutes=1))
+        self.assertEqual(self.middleware(self.request()).status_code, 200)
+        self.assertFalse(AluRateBucket.objects.filter(key='expired').exists())
+        self.assertNotIn('student', AluRateBucket.objects.get().key)

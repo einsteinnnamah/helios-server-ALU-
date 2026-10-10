@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/docker-demo.yml'
       - 'Dockerfile'
+      - '.dockerignore'
       - 'uv.lock'
       - 'pyproject.toml'
       - 'settings*.py'
@@ -42,10 +43,16 @@ jobs:
       - name: Build production image
         run: docker build --tag alu-helios-demo .
       - name: Test encrypted voting and bridge in the built image
-        run: >-
-          docker run --rm --network host
-          --env DJANGO_SETTINGS_MODULE=settings_ci
-          alu-helios-demo python manage.py test --settings=settings_ci -v 1
+        # Keep fixtures out of the deployable image. Mount only tracked CI
+        # settings/tests; application code and installed dependencies stay built.
+        run: |
+          test_mounts=(--mount "type=bind,source=$PWD/settings_ci.py,target=/app/settings_ci.py,readonly")
+          while IFS= read -r test_file; do
+            test_mounts+=(--mount "type=bind,source=$PWD/$test_file,target=/app/$test_file,readonly")
+          done < <(git ls-files 'helios/test*.py' 'helios_auth/test*.py')
+          docker run --rm --network host "${test_mounts[@]}" \
+            --env DJANGO_SETTINGS_MODULE=settings_ci \
+            alu-helios-demo python manage.py test --settings=settings_ci -v 1
       - name: Check strict demo runtime configuration
         run: >-
           docker run --rm

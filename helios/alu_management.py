@@ -105,6 +105,8 @@ def manage(request):
     operation = data['operation']
     if operation not in ('create', 'ballot', 'freeze', 'tally', 'combine', 'release'):
       raise ValueError()
+    if 'start_now' in data and (operation != 'freeze' or type(data['start_now']) is not bool):
+      raise ValueError()
     identity = management_identity(data)
     with transaction.atomic():
       # Serialize even the first creation, when no binding row exists to lock.
@@ -157,6 +159,8 @@ def manage(request):
         election.save()
         election.append_log('Approved ALU ballot synchronized by ' + actor.user_id)
       elif operation != 'create':
+        if operation == 'freeze' and data.get('start_now') and election.voting_has_stopped():
+          raise PermissionDenied('Closed voting cannot be reopened.')
         # Reject out-of-order operations before native handlers or expensive work.
         if operation in ('tally', 'combine', 'release') and not election.frozen_at:
           raise PermissionDenied('Freeze the approved ballot before tallying.')
@@ -187,7 +191,18 @@ def manage(request):
           if response.status_code != 302:
             raise PermissionDenied('Election workflow is not ready for this action.')
           election.refresh_from_db()
+      if operation == 'freeze' and data.get('start_now'):
+        # Native Helios supports an actual start distinct from the frozen schedule.
+        # Retrying never moves the actual start or changes the closing deadline.
+        if not election.frozen_at:
+          raise PermissionDenied('Freeze the approved ballot before opening voting.')
+        if not election.voting_started_at and not election.voting_has_started():
+          election.voting_started_at = datetime.datetime.utcnow()
+          election.save(update_fields=['voting_started_at'])
+          election.append_log('Voting opened manually by ' + actor.user_id)
       return private_response(JsonResponse({'election_id': election_id,
+        'open': bool(election.voting_has_started() and not election.voting_has_stopped()),
+        'voting_started_at': election.voting_started_at.isoformat() + 'Z' if election.voting_started_at else None,
         'frozen': bool(election.frozen_at), 'closed': bool(election.voting_has_stopped()),
         'released': bool(election.result_released_at), 'setup_digest': setup_digest(election)}))
   except PermissionDenied:

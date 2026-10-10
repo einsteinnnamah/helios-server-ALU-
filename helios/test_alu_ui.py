@@ -194,3 +194,39 @@ class AluUiTests(test_bridge.BridgeTests):
     self.assertEqual(self.management('combine', election_id).status_code, 200)
     self.assertEqual(self.management('release', election_id).status_code, 200)
     self.assertEqual(self.client.get(base + '/ui/ballot').json()['result'], [[0, 1]])
+
+  def test_scheduled_and_manual_start_preserve_frozen_ballot_and_deadline(self):
+    import datetime
+    election_id = str(uuid.uuid4())
+    self.assertEqual(self.management('create', election_id, name='Scheduled election').status_code, 200)
+    now = datetime.datetime.utcnow()
+    start = now + datetime.timedelta(days=2)
+    end = now + datetime.timedelta(days=3)
+    synced = self.management('ballot', election_id, name='Scheduled election',
+      seats=[{'title':'President','answers':['Alice','Bob']}],
+      voting_starts_at=start.isoformat()+'Z', voting_ends_at=end.isoformat()+'Z')
+    digest = synced.json()['setup_digest']
+    frozen = self.management('freeze', election_id, setup_digest=digest, start_now=False)
+    self.assertEqual(frozen.status_code, 200)
+    self.assertFalse(frozen.json()['open'])
+    base = f'/helios/elections/{election_id}/ui/ballot'
+    before = self.client.get(base).json()
+    self.assertFalse(before['open'])
+    with patch('helios.models.datetime.datetime') as clock:
+      clock.utcnow.return_value = start + datetime.timedelta(seconds=1)
+      self.assertTrue(models.Election.get_by_uuid(election_id).voting_has_started())
+    self.assertEqual(self.management('freeze', election_id, subject='wrong', setup_digest=digest, start_now=True).status_code, 403)
+    opened = self.management('freeze', election_id, setup_digest=digest, start_now=True)
+    self.assertEqual(opened.status_code, 200)
+    self.assertTrue(opened.json()['open'])
+    election = models.Election.get_by_uuid(election_id)
+    actual = election.voting_started_at
+    self.assertIsNotNone(actual)
+    self.assertEqual(election.voting_starts_at,start)
+    self.assertEqual(election.voting_ends_at,end)
+    self.assertEqual(before['raw'],self.client.get(base).json()['raw'])
+    self.assertEqual(self.management('freeze', election_id, setup_digest=digest, start_now=True).status_code, 200)
+    self.assertEqual(models.Election.get_by_uuid(election_id).voting_started_at,actual)
+    election.voting_ended_at=now-datetime.timedelta(seconds=1);election.save()
+    self.assertEqual(self.management('freeze', election_id, setup_digest=digest, start_now=True).status_code,403)
+    self.assertEqual(self.management('freeze', election_id, setup_digest=digest, start_now='true').status_code,400)

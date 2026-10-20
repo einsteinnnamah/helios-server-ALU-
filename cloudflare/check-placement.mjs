@@ -27,31 +27,27 @@ const probe = await fetch('https://alu-voting-backend.e-nnamah.workers.dev/helio
 });
 await probe.body?.cancel();
 if (probe.status !== 404) throw new Error('Backend read-only startup probe failed.');
+const diagnostic = {
+  container_location: probe.headers.get('x-voting-location'),
+  container_region: probe.headers.get('x-voting-region'),
+  database_region: probe.headers.get('x-voting-database-region'),
+  database_pooler: probe.headers.get('x-voting-database-pooler'),
+};
 const instances = wrangler('instances', application.id);
 const rows = Array.isArray(instances) ? instances : instances.instances;
 if (!Array.isArray(rows)) throw new Error('Unknown instance placement response.');
 const active = rows.filter(i => i.location && i.state !== 'inactive');
 console.log(JSON.stringify({ constraints, instances: rows.map(i => ({
   state: typeof i.state === 'string' ? i.state : i.state?.status,
-  location: i.location?.name, region: i.location?.region,
+  location: typeof i.location === 'string' ? i.location : i.location?.name,
+  region: i.location?.region,
 })) }, null, 2));
 if (active.some(i => i.location?.region && i.location.region !== 'ENAM')) {
   throw new Error('A running container is outside the configured database region area.');
 }
 if (!active.length) throw new Error('No active container location was reported.');
-let diagnostic;
-try {
-  const output = execFileSync(process.execPath,
-    ['node_modules/wrangler/bin/wrangler.js', 'containers', 'ssh', active[0].id,
-      '--', 'python', '/app/manage.py', 'voting_placement'],
-    { encoding: 'utf8', timeout: 45_000, stdio: ['ignore', 'pipe', 'pipe'] });
-  diagnostic = output.split('\n').map(line=>{
-    try { return JSON.parse(line); } catch { return null; }
-  }).find(row=>row?.database_region);
-} catch {
-  throw new Error('Read-only database placement diagnostic unavailable; provider output withheld.');
-}
-if (!diagnostic || diagnostic.database_region !== 'us-east-2' || diagnostic.transaction_pooler !== false) {
+if (diagnostic.database_region !== 'us-east-2' || diagnostic.database_pooler !== 'direct' ||
+    !diagnostic.container_location || diagnostic.container_location === 'unknown') {
   throw new Error('Expected the direct Ohio database connection for verification wake notifications.');
 }
 console.log(JSON.stringify(diagnostic));

@@ -1,6 +1,8 @@
 """Private metadata probe used by the Cloudflare recovery alarm."""
 import hmac
 import datetime
+import os
+import re
 
 from django.conf import settings
 from django.db.models import Q
@@ -21,7 +23,19 @@ class ContainerHealthMiddleware:
             response = HttpResponse('ready', content_type='text/plain')
             response['Cache-Control'] = 'no-store'
             return response
-        return self.get_response(request)
+        response = self.get_response(request)
+        if request.method == 'GET' and request.path.endswith('/ui/ballot'):
+            # Non-sensitive deployment metadata, including on an unknown
+            # election's 404. Operators can verify placement without SSH keys,
+            # voter identity, a real ballot, or any additional database query.
+            host = settings.DATABASES['default'].get('HOST', '')
+            region = re.search(r'\b((?:us|eu|ap|ca|sa|me|af|il)-(?:east|west|central|south|north|southeast|northeast)-\d)\b', host)
+            response['X-Voting-Database-Region'] = region[1] if region else 'unknown'
+            for header, variable in [('X-Voting-Location', 'CLOUDFLARE_LOCATION'),
+                                     ('X-Voting-Region', 'CLOUDFLARE_REGION')]:
+                response[header] = re.sub(r'[^A-Za-z0-9 _-]', '', os.environ.get(variable, 'unknown'))[:80]
+            response['X-Voting-Database-Pooler'] = 'transaction' if '-pooler' in host else 'direct'
+        return response
 
 
 @require_GET

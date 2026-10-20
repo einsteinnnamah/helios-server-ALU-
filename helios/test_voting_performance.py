@@ -6,11 +6,30 @@ from unittest.mock import patch
 
 from django.db import connection, transaction
 from django.test import Client, override_settings
+from django.test import SimpleTestCase, RequestFactory
 from django.test.utils import CaptureQueriesContext
 
 from helios import models
 from helios import test_alu_submission as fixtures
 from helios.verification_wakeup import VerificationWakeup
+
+
+class PlacementMetadataTests(SimpleTestCase):
+    def test_unknown_ballot_reports_regions_without_identity_or_a_query(self):
+        from django.http import HttpResponse
+        from helios.runtime_health import ContainerHealthMiddleware
+        from types import SimpleNamespace
+        request = RequestFactory().get('/helios/elections/unknown/ui/ballot')
+        configured = SimpleNamespace(DATABASES={'default':{
+            'HOST':'private-tenant.us-east-2.aws.neon.tech'}})
+        with patch('helios.runtime_health.settings', configured), patch.dict('os.environ', {
+                'CLOUDFLARE_LOCATION':'Newark', 'CLOUDFLARE_REGION':'ENAM'}):
+            response = ContainerHealthMiddleware(lambda _:HttpResponse(status=404))(request)
+        self.assertEqual(response['X-Voting-Location'], 'Newark')
+        self.assertEqual(response['X-Voting-Region'], 'ENAM')
+        self.assertEqual(response['X-Voting-Database-Region'], 'us-east-2')
+        self.assertEqual(response['X-Voting-Database-Pooler'], 'direct')
+        self.assertNotIn('private-tenant', str(response.headers))
 
 
 class VotingPerformanceTests(fixtures.SubmissionTests):

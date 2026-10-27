@@ -123,18 +123,18 @@ class ProcessReportTests(TestCase):
         self.assertFalse(state()['keep_alive'])
         self.assertEqual(state()['next_wake_at'],int((self.election.voting_starts_at-datetime.timedelta(minutes=5)).replace(tzinfo=datetime.timezone.utc).timestamp()*1000))
         self.election.voting_started_at=now;self.election.save()
-        self.assertTrue(state()['keep_alive'])
+        self.assertFalse(state()['keep_alive'], 'An early manual opening uses the request idle window')
         self.election.voting_ended_at=now;self.election.save()
-        self.assertTrue(state()['keep_alive'])
+        self.assertFalse(state()['keep_alive'], 'Closed unpublished elections do not pin paid uptime')
         other=models.Election.objects.create(admin=self.actor,uuid=str(uuid.uuid4()),short_name='overlap',name='Overlap',frozen_at=now,voting_started_at=now)
         self.election.result_released_at=now;self.election.save()
-        self.assertTrue(state()['keep_alive'])
+        self.assertFalse(state()['keep_alive'])
         other.result_released_at=now;other.save()
         self.assertFalse(state()['keep_alive'])
         self.assertIsNone(state()['next_wake_at'])
         # Frozen elections without a start date are immediately open in Helios.
         immediate=models.Election.objects.create(admin=self.actor,uuid=str(uuid.uuid4()),short_name='immediate',name='Immediate',frozen_at=now)
-        self.assertTrue(state()['keep_alive'])
+        self.assertFalse(state()['keep_alive'], 'Unscheduled elections sleep when inactive')
         immediate.result_released_at=now;immediate.save()
         voter=models.Voter.objects.create(election=immediate,uuid=str(uuid.uuid4()),voter_login_id='pending-test')
         with connection.cursor() as q:
@@ -143,10 +143,62 @@ class ProcessReportTests(TestCase):
         job=models.VoteVerificationJob.objects.create(cast_vote_id=cast_id)
         self.assertTrue(state()['keep_alive'])
         job.state='failed';job.save()
-        self.assertTrue(state()['keep_alive'])
+        self.assertFalse(state()['keep_alive'], 'A terminal failure needs review, not perpetual warming')
         self.assertTrue(state()['needs_attention'])
         job.state='complete';job.save()
         self.assertFalse(state()['keep_alive'])
+
+    @override_settings(RECOVERY_SECRET='test-lifecycle-secret')
+    def test_lifecycle_prewarming_is_bounded_and_ignores_inactive_elections(self):
+        from helios.runtime_health import verification_state
+        from django.test import RequestFactory
+        def state():
+            request=RequestFactory().get('/internal/verification-state',HTTP_AUTHORIZATION='Bearer test-lifecycle-secret')
+            return json.loads(verification_state(request).content)
+        now=datetime.datetime.utcnow()
+        self.election.frozen_at=now
+        self.election.voting_starts_at=now+datetime.timedelta(minutes=4)
+        self.election.voting_ends_at=now+datetime.timedelta(hours=2)
+        self.election.save()
+        self.assertTrue(state()['keep_alive'], 'Prewarm five minutes before the scheduled opening')
+        self.election.voting_starts_at=now-datetime.timedelta(minutes=4);self.election.save()
+        self.assertTrue(state()['keep_alive'], 'Opening has a short grace window')
+        self.election.voting_starts_at=now-datetime.timedelta(minutes=6);self.election.save()
+        self.assertFalse(state()['keep_alive'], 'An open election eventually uses request-driven idle sleep')
+        self.assertIsNone(state()['next_wake_at'])
+        self.election.voting_starts_at=now+datetime.timedelta(days=1)
+        self.election.deleted_at=now;self.election.save()
+        self.assertFalse(state()['keep_alive'])
+        self.assertIsNone(state()['next_wake_at'], 'Deleted elections cannot wake a container')
+        self.election.deleted_at=None
+        self.election.voting_ended_at=now;self.election.save()
+        self.assertIsNone(state()['next_wake_at'], 'Closed elections cannot schedule another opening')
+        self.election.voting_ended_at=None
+        self.election.voting_ends_at=now-datetime.timedelta(minutes=1);self.election.save()
+        self.assertIsNone(state()['next_wake_at'], 'Expired voting windows cannot schedule a wake')
+        self.election.voting_extended_until=now+datetime.timedelta(days=2);self.election.save()
+        self.assertIsNotNone(state()['next_wake_at'], 'A valid extension preserves scheduled prewarming')
+        self.election.voting_started_at=now;self.election.save()
+        self.assertIsNone(state()['next_wake_at'], 'Manual opening does not prewarm again on the original future date')
+
+    @override_settings(RECOVERY_SECRET='test-lifecycle-secret')
+    def test_quarantined_work_does_not_pin_uptime_until_released(self):
+        from helios.runtime_health import verification_state
+        from django.test import RequestFactory
+        now=datetime.datetime.utcnow()
+        voter=models.Voter.objects.create(election=self.election,uuid=str(uuid.uuid4()),voter_login_id='quarantine-test')
+        with connection.cursor() as q:
+            q.execute("insert into helios_castvote(vote,vote_hash,cast_at,quarantined_p,voter_id) values(%s,%s,%s,%s,%s) returning id",['opaque-test-ciphertext','quarantined-hash',now,True,voter.id])
+            cast_id=q.fetchone()[0]
+        models.VoteVerificationJob.objects.create(cast_vote_id=cast_id)
+        def state():
+            request=RequestFactory().get('/internal/verification-state',HTTP_AUTHORIZATION='Bearer test-lifecycle-secret')
+            return json.loads(verification_state(request).content)
+        self.assertFalse(state()['pending'])
+        self.assertFalse(state()['keep_alive'])
+        models.CastVote.objects.filter(id=cast_id).update(released_from_quarantine_at=now)
+        self.assertTrue(state()['pending'])
+        self.assertTrue(state()['keep_alive'], 'Released verification work remains protected')
 
 
     def test_eligibility_batches_are_bounded_and_fail_closed(self):

@@ -127,6 +127,7 @@ export default {
       if (checked instanceof Response) return checked;
       if ((/^\/helios\/elections\/[^/]+\/cast_confirm$/.test(url.pathname) &&
           ['GET', 'POST'].includes(request.method)) ||
+          (/^\/helios\/elections\/[^/]+\/ui\/cast$/.test(url.pathname) && request.method === 'POST') ||
           url.pathname === '/helios/alu/manage' && request.method === 'POST') {
         // Arm before forwarding: a crash after accepting the vote cannot leave
         // recovery dependent on this request completing or another student.

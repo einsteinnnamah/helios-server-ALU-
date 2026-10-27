@@ -55,23 +55,25 @@ def verification_state(request):
         # Only runnable background work should pin a billable container. Failed
         # jobs and quarantined ballots need an operator, not endless polling.
         keep_alive = VoteConfirmationEmail.objects.filter(state__in=['pending', 'sending']).exists() or pending
-        next_wake = None
-        # Requests already renew the SDK's ten-minute idle window. An open or
-        # unpublished election must not turn that into continuous paid uptime.
-        # Prewarm once around a future scheduled opening, then use activity.
+        from .election_completion import recovery_schedule
+        completion_due, retry_at, completion_attention = recovery_schedule(now)
+        keep_alive = keep_alive or completion_due
+        attention = attention or completion_attention
+        next_wake = int(retry_at.replace(tzinfo=datetime.timezone.utc).timestamp()*1000) if retry_at else None
+        # Official voting remains warm from five minutes before opening until
+        # closure. Closed/unpublished elections alone never pin paid uptime.
         # Helios dates are naive UTC; all elections share the same container.
         for election in Election.objects.filter(frozen_at__isnull=False,
                 result_released_at__isnull=True, deleted_at__isnull=True,
-                voting_started_at__isnull=True, voting_ended_at__isnull=True,
-                tallying_started_at__isnull=True, voting_starts_at__isnull=False).only(
-                'voting_starts_at', 'voting_ends_at', 'voting_extended_until'):
-            start = election.voting_starts_at
+                voting_ended_at__isnull=True, tallying_started_at__isnull=True).only(
+                'voting_starts_at', 'voting_started_at', 'voting_ends_at', 'voting_extended_until'):
+            start = election.voting_started_at or election.voting_starts_at
             end = election.voting_extended_until or election.voting_ends_at
             if end and end <= now:
                 continue
-            if start - datetime.timedelta(minutes=5) <= now < start + datetime.timedelta(minutes=5):
+            if start is None or start <= now + datetime.timedelta(minutes=5):
                 keep_alive = True
-            elif start > now + datetime.timedelta(minutes=5):
+            else:
                 wake = int((start - datetime.timedelta(minutes=5)).replace(tzinfo=datetime.timezone.utc).timestamp() * 1000)
                 next_wake = wake if next_wake is None else min(next_wake, wake)
         response = JsonResponse({'pending': pending, 'needs_attention': attention,

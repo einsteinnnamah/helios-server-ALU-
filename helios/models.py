@@ -1338,6 +1338,19 @@ class VoteVerificationJob(models.Model):
       condition=models.Q(state='pending'), name='helios_vjob_pending_idx')]
 
 
+class ElectionCompletionJob(models.Model):
+  """Durable automatic tally/archive work; payload contains aggregate data only."""
+  election = models.OneToOneField(Election, on_delete=models.PROTECT, related_name='completion_job')
+  state = models.CharField(max_length=12, default='pending')
+  attempts = models.PositiveIntegerField(default=0)
+  next_attempt_at = models.DateTimeField(default=datetime.datetime.utcnow, db_index=True)
+  lease = models.UUIDField(null=True)
+  lease_until = models.DateTimeField(null=True)
+  payload = models.JSONField(null=True)
+  saved_at = models.DateTimeField(null=True)
+  last_error_code = models.CharField(max_length=80, default='', blank=True)
+
+
 class VoteConfirmationEmail(models.Model):
   """One email per verified ballot; retries contain no candidate choices."""
   id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

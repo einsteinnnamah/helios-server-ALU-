@@ -127,7 +127,7 @@ def manage(request):
     if election_id != data['election_id']:
       raise ValueError()
     operation = data['operation']
-    if operation not in ('create', 'ballot', 'freeze', 'tally', 'combine', 'release', 'stats', 'report', 'prepare'):
+    if operation not in ('create', 'ballot', 'freeze', 'close', 'tally', 'combine', 'release', 'stats', 'report', 'prepare'):
       raise ValueError()
     if 'start_now' in data and (operation not in ('freeze', 'prepare') or type(data['start_now']) is not bool):
       raise ValueError()
@@ -156,6 +156,23 @@ def manage(request):
           client_id=settings.ALU_BRIDGE_CLIENT_ID)
       if not binding:
         raise PermissionDenied('Election unavailable.')
+      if operation == 'close':
+        from .election_completion import enabled
+        if not enabled():
+          raise PermissionDenied('Automatic counting is not configured.')
+        election = models.Election.objects.select_for_update().get(pk=binding.election_id)
+        if not election.frozen_at or not election.voting_has_started():
+          raise PermissionDenied('Voting has not started.')
+        if not election.voting_has_stopped():
+          election.voting_ended_at = datetime.datetime.utcnow()
+          election.save(update_fields=['voting_ended_at'])
+        job, _ = models.ElectionCompletionJob.objects.get_or_create(election=election)
+        if job.state in ('failed', 'blocked'):
+          job.state, job.attempts, job.next_attempt_at = 'pending', 0, datetime.datetime.utcnow()
+          job.save(update_fields=['state', 'attempts', 'next_attempt_at'])
+        return private_response(JsonResponse({'election_id': election.uuid, 'open': False,
+          'frozen': True, 'closed': True, 'released': bool(election.result_released_at),
+          'setup_digest': setup_digest(election), 'lifecycle': lifecycle_dates(election, True)}))
       if operation in ('stats', 'report'):
         # A count probe needs dates and final numbers, never cryptographic blobs.
         election = models.Election.objects.defer('encrypted_tally', 'public_key', 'private_key',

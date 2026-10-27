@@ -41,6 +41,8 @@ def main():
     commands.extend([[sys.executable, 'manage.py', 'run_vote_verifier']
                      for _ in range(verifier_count)])
     commands.append([sys.executable, 'manage.py', 'run_vote_confirmation_sender'])
+    if os.environ.get('ALU_AUTOMATIC_COMPLETION') == '1':
+        commands.append([sys.executable, 'manage.py', 'run_election_completion'])
     exit_code = 0
     try:
         for command in commands:

@@ -50,7 +50,7 @@ test('an empty queue stops polling, while a future opening has one scheduled wak
   const s=recovery(async()=>Response.json({...idle,next_wake_at:future}));
   await s.object.alarm();assert.equal(s.storage.alarmAt,future);
 });
-test('runnable work or a bounded prewarm window retains the recovery alarm',async()=>{
+test('runnable work, prewarming or open voting retains the recovery alarm',async()=>{
   for(const state of [{...idle,pending:true},{...idle,keep_alive:true}]){
     const r=recovery(async()=>Response.json(state));await r.object.alarm();assert.equal(r.storage.alarmAt,now+60_000);
   }
@@ -85,4 +85,12 @@ test('JSON submission arms recovery before forwarding and finishes its lease',as
   events.length=0;assert.equal((await worker.fetch(request(false),env)).status,401);assert.deepEqual(events,[]);
   env.BACKEND.getByName=()=>({fetch:async()=>{events.push('forward');throw Error('Lost response after commit');}});
   assert.equal((await worker.fetch(request(),env)).status,503);assert.deepEqual(events,['arm','forward','finish']);
+});
+test('reading a public ballot bootstraps lifecycle recovery without submitting a vote',async()=>{
+  const events=[];
+  const env={PUBLIC_BACKEND_ORIGIN:'https://backend.example',ALU_BRIDGE_APP_ORIGIN:'https://app.example',
+    RECOVERY:{getByName:()=>({arm:async()=>{events.push('arm');return 'ballot';},finish:async id=>{assert.equal(id,'ballot');events.push('finish');}})},
+    BACKEND:{getByName:()=>({fetch:async request=>{assert.equal(request.method,'GET');assert.equal(request.body,null);events.push('forward');return Response.json({open:false});}})}};
+  const response=await worker.fetch(new Request('https://backend.example/helios/elections/test/ui/ballot'),env);
+  assert.equal(response.status,200);assert.deepEqual(events,['arm','forward','finish']);
 });

@@ -519,7 +519,7 @@ class AluUiTests(test_bridge.BridgeTests):
       voting_ends_at=(now+datetime.timedelta(days=2)).isoformat()+'Z', start_now=True)
     self.assertEqual(prepared.status_code, 200)
     self.assertTrue(prepared.json()['open'])
-    self.assertFalse(lifecycle()['keep_alive'], 'Requests keep the service warm without pinning an idle election')
+    self.assertTrue(lifecycle()['keep_alive'], 'Official voting remains warm while it is open')
     self.election = models.Election.get_by_uuid(election_id)
     self.client = Client()
     self.finish(self.begin())

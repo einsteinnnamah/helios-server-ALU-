@@ -39,6 +39,7 @@ SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SECURE = True
 TIME_ZONE = 'Africa/Kigali'
 ALU_VOTE_VERIFICATION_BACKEND = 'database'
+ALU_AUTOMATIC_COMPLETION = os.environ.get('ALU_AUTOMATIC_COMPLETION') == '1'
 RECOVERY_SECRET = os.environ['RECOVERY_SECRET']
 # Vote verification uses the durable database queue. Legacy tally/notification
 # tasks still run synchronously; frontend transactional emails are unaffected.

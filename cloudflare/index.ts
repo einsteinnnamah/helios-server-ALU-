@@ -31,6 +31,7 @@ export class VotingBackend extends Container<Env> {
     RECOVERY_SECRET: this.env.RECOVERY_SECRET,
     URL_HOST: backendOrigin(this.env).origin,
     ALU_VOTE_VERIFICATION_BACKEND: 'database',
+    ALU_AUTOMATIC_COMPLETION: '1',
     WEB_CONCURRENCY: '2',
     GUNICORN_THREADS: '4',
     VOTE_VERIFIER_CONCURRENCY: '2',
@@ -127,6 +128,7 @@ export default {
       if (checked instanceof Response) return checked;
       if ((/^\/helios\/elections\/[^/]+\/cast_confirm$/.test(url.pathname) &&
           ['GET', 'POST'].includes(request.method)) ||
+          (/^\/helios\/elections\/[^/]+\/ui\/ballot$/.test(url.pathname) && request.method === 'GET') ||
           (/^\/helios\/elections\/[^/]+\/ui\/cast$/.test(url.pathname) && request.method === 'POST') ||
           url.pathname === '/helios/alu/manage' && request.method === 'POST') {
         // Arm before forwarding: a crash after accepting the vote cannot leave

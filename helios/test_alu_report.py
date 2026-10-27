@@ -123,18 +123,18 @@ class ProcessReportTests(TestCase):
         self.assertFalse(state()['keep_alive'])
         self.assertEqual(state()['next_wake_at'],int((self.election.voting_starts_at-datetime.timedelta(minutes=5)).replace(tzinfo=datetime.timezone.utc).timestamp()*1000))
         self.election.voting_started_at=now;self.election.save()
-        self.assertFalse(state()['keep_alive'], 'An early manual opening uses the request idle window')
+        self.assertTrue(state()['keep_alive'], 'An open election stays warm until closure')
         self.election.voting_ended_at=now;self.election.save()
         self.assertFalse(state()['keep_alive'], 'Closed unpublished elections do not pin paid uptime')
         other=models.Election.objects.create(admin=self.actor,uuid=str(uuid.uuid4()),short_name='overlap',name='Overlap',frozen_at=now,voting_started_at=now)
         self.election.result_released_at=now;self.election.save()
-        self.assertFalse(state()['keep_alive'])
+        self.assertTrue(state()['keep_alive'])
         other.result_released_at=now;other.save()
         self.assertFalse(state()['keep_alive'])
         self.assertIsNone(state()['next_wake_at'])
         # Frozen elections without a start date are immediately open in Helios.
         immediate=models.Election.objects.create(admin=self.actor,uuid=str(uuid.uuid4()),short_name='immediate',name='Immediate',frozen_at=now)
-        self.assertFalse(state()['keep_alive'], 'Unscheduled elections sleep when inactive')
+        self.assertTrue(state()['keep_alive'], 'Unscheduled open elections stay warm until manually closed')
         immediate.result_released_at=now;immediate.save()
         voter=models.Voter.objects.create(election=immediate,uuid=str(uuid.uuid4()),voter_login_id='pending-test')
         with connection.cursor() as q:
@@ -149,7 +149,7 @@ class ProcessReportTests(TestCase):
         self.assertFalse(state()['keep_alive'])
 
     @override_settings(RECOVERY_SECRET='test-lifecycle-secret')
-    def test_lifecycle_prewarming_is_bounded_and_ignores_inactive_elections(self):
+    def test_lifecycle_prewarms_then_stays_warm_until_close_and_ignores_inactive_elections(self):
         from helios.runtime_health import verification_state
         from django.test import RequestFactory
         def state():
@@ -162,9 +162,9 @@ class ProcessReportTests(TestCase):
         self.election.save()
         self.assertTrue(state()['keep_alive'], 'Prewarm five minutes before the scheduled opening')
         self.election.voting_starts_at=now-datetime.timedelta(minutes=4);self.election.save()
-        self.assertTrue(state()['keep_alive'], 'Opening has a short grace window')
+        self.assertTrue(state()['keep_alive'], 'Open voting stays warm')
         self.election.voting_starts_at=now-datetime.timedelta(minutes=6);self.election.save()
-        self.assertFalse(state()['keep_alive'], 'An open election eventually uses request-driven idle sleep')
+        self.assertTrue(state()['keep_alive'], 'Open voting stays warm beyond the first few minutes')
         self.assertIsNone(state()['next_wake_at'])
         self.election.voting_starts_at=now+datetime.timedelta(days=1)
         self.election.deleted_at=now;self.election.save()

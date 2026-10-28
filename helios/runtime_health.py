@@ -35,6 +35,7 @@ class ContainerHealthMiddleware:
                                      ('X-Voting-Region', 'CLOUDFLARE_REGION')]:
                 response[header] = re.sub(r'[^A-Za-z0-9 _-]', '', os.environ.get(variable, 'unknown'))[:80]
             response['X-Voting-Database-Pooler'] = 'transaction' if '-pooler' in host else 'direct'
+            response['X-Voting-Automatic-Completion'] = 'enabled' if getattr(settings, 'ALU_AUTOMATIC_COMPLETION', False) else 'disabled'
         return response
 
 

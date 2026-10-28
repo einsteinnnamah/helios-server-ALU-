@@ -2,6 +2,8 @@ name: Backend Docker validation
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [master]
   push:
     branches: [master]
     paths:
@@ -14,6 +16,8 @@ on:
       - 'helios/**'
       - 'helios_auth/**'
       - 'scripts/backend-start.sh'
+      - 'scripts/start-voting.py'
+      - 'scripts/check-container-startup.py'
 
 permissions:
   contents: read
@@ -66,3 +70,5 @@ jobs:
           --env URL_HOST=https://helios.example
           --env RECOVERY_SECRET=ci-only-long-placeholder-recovery-secret-with-32-bytes
           alu-helios-demo python manage.py check --settings=settings_cloudflare
+      - name: Exercise the production entrypoint and completion workers
+        run: python scripts/check-container-startup.py alu-helios-demo '${{ job.services.postgres.id }}'

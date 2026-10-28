@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { Container } from '@cloudflare/containers';
 import { protectRequest, refusal } from './protection';
+import {runtimeDemand, type RuntimeDemand} from './demand';
 
 const BACKEND_NAME = 'voting-backend-v1';
 const RECOVERY_NAME = 'verification-recovery-v1';
@@ -18,7 +19,7 @@ function backendOrigin(env: Env): URL {
 
 export class VotingBackend extends Container<Env> {
   defaultPort = 10000;
-  sleepAfter = '10m';
+  sleepAfter = '3m';
   envVars = {
     DJANGO_SETTINGS_MODULE: 'settings_cloudflare',
     DATABASE_URL: this.env.DATABASE_URL,
@@ -74,11 +75,29 @@ export class VerificationRecovery extends DurableObject<Env> {
     }
   }
 
+  protected readDemand(): Promise<RuntimeDemand> {
+    return runtimeDemand(this.env).catch(() => {throw new Error('Runtime demand check unavailable.');});
+  }
+
   async alarm(): Promise<void> {
     // Persist the next check before network I/O so an interrupted alarm still
     // has a recovery path. Healthy empty queues clear it to avoid idle charges.
     await this.ctx.storage.setAlarm(Date.now() + RECOVERY_INTERVAL);
     const revision = this.revision();
+    // Query Neon first. An idle recovery check must never start a billable VM
+    // just to ask that VM whether it has anything to do.
+    const state = await this.readDemand();
+    if (state.needs_attention) console.error('Vote verification or completion requires operator review.');
+    // An in-flight confirmation may not have committed its job yet. Keep the
+    // alarm while its durable lease exists, even if Neon saw an empty queue.
+    const active = this.ctx.storage.sql.exec<{total: number}>(
+      'SELECT COUNT(*) AS total FROM inflight WHERE expires_at > ?', Date.now()).one().total;
+    if (!state.keep_alive && !state.pending && active === 0 && this.revision() === revision) {
+      if (state.next_wake_at !== null) await this.ctx.storage.setAlarm(Math.max(Date.now() + 1000, state.next_wake_at));
+      else await this.ctx.storage.deleteAlarm();
+      console.info(JSON.stringify({event: 'voting_runtime_idle', next_wake_at: state.next_wake_at}));
+      return;
+    }
     const origin = backendOrigin(this.env);
     const probeUrl = new URL('/internal/verification-state', origin);
     probeUrl.protocol = 'http:';
@@ -93,21 +112,9 @@ export class VerificationRecovery extends DurableObject<Env> {
       }));
     if (!response.ok) {
       await response.body?.cancel();
-      throw new Error('Verification recovery probe unavailable.');
+      throw new Error('Verification recovery probe unavailable (HTTP ' + response.status + ').');
     }
-    const state: {pending?: unknown; needs_attention?: unknown; keep_alive?: unknown; next_wake_at?: unknown} = await response.json();
-    if (typeof state.pending !== 'boolean' || typeof state.needs_attention !== 'boolean' || typeof state.keep_alive !== 'boolean' || (state.next_wake_at !== null && (!Number.isSafeInteger(state.next_wake_at) || Number(state.next_wake_at) <= 0))) {
-      throw new Error('Invalid verification recovery probe.');
-    }
-    if (state.needs_attention) console.error('Vote verification requires operator review.');
-    // An in-flight confirmation may not have committed its job yet. Keep the
-    // alarm while its durable lease exists, even if this probe saw an empty queue.
-    const active = this.ctx.storage.sql.exec<{total: number}>(
-      'SELECT COUNT(*) AS total FROM inflight WHERE expires_at > ?', Date.now()).one().total;
-    if (!state.keep_alive && !state.pending && active === 0 && this.revision() === revision) {
-      if (state.next_wake_at !== null) await this.ctx.storage.setAlarm(Math.max(Date.now() + 1000, Number(state.next_wake_at)));
-      else await this.ctx.storage.deleteAlarm();
-    }
+    await response.body?.cancel();
   }
 }
 
@@ -117,6 +124,9 @@ export default {
     if (url.pathname.startsWith('/internal/')) {
       return new Response('Not found', {status: 404, headers: {'Cache-Control': 'no-store'}});
     }
+    // This is an API backend. Generic root health checks and crawlers should
+    // not provision a voting VM; actual readiness checks use the ballot API.
+    if (url.pathname === '/' && ['GET', 'HEAD'].includes(request.method)) return refusal('Not found', 404);
     let recovery: DurableObjectStub<VerificationRecovery> | undefined;
     let lease: string | undefined;
     try {

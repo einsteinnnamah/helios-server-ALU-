@@ -92,7 +92,7 @@ export async function runtimeDemand(env: Pick<Env, 'DATABASE_URL' | 'ALU_BRIDGE_
     if (value === null) return null;
     const result = Number(value);
     if (!Number.isFinite(result) || result <= 0) throw new Error('Invalid runtime schedule.');
-    return result;
+    return Math.trunc(result);
   };
   return demandFromRows({
     elections: windows.map(w => ({start: epoch(w.start), end: epoch(w.end)})),

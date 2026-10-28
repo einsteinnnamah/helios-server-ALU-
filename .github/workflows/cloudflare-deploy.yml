@@ -52,7 +52,7 @@ jobs:
           npm run check
       - name: Test lifecycle recovery and placement verification
         working-directory: cloudflare
-        run: node --test check-placement.test.mjs lifecycle.test.mjs
+        run: node --test check-placement.test.mjs lifecycle.test.mjs demand.test.mjs
       - name: Build the backend and check runtime integrity
         run: |
           docker build --tag alu-cloudflare-validated .

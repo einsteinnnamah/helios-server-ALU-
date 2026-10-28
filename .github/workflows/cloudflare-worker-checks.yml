@@ -1,0 +1,22 @@
+name: Cloudflare Worker checks
+on:
+  push:
+    paths: ['cloudflare/**', '.github/workflows/cloudflare-worker-checks.yml']
+  pull_request:
+    paths: ['cloudflare/**', '.github/workflows/cloudflare-worker-checks.yml']
+permissions:
+  contents: read
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+      - run: npm ci --prefix cloudflare
+      - run: npm run types --prefix cloudflare
+      - run: npm run check --prefix cloudflare
+      - run: node --test cloudflare/demand.test.mjs cloudflare/lifecycle.test.mjs cloudflare/check-placement.test.mjs

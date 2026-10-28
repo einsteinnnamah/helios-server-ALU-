@@ -39,20 +39,29 @@ function recovery(probe=async()=>Response.json(idle)){
     if(!/^SELECT/i.test(sql)){statement.run(...args);return {};}
     const rows=statement.all(...args);return {one(){assert.equal(rows.length,1);return rows[0];}};
   }},async getAlarm(){return this.alarmAt;},async setAlarm(t){this.alarmAt=t;},async deleteAlarm(){this.alarmAt=null;}};
+  const calls=[];
   const env={PUBLIC_BACKEND_ORIGIN:'https://backend.example',RECOVERY_SECRET:'test-only',
-    BACKEND:{getByName:()=>({fetch:probe})}};
-  return {object:new VerificationRecovery({storage},env),storage};
+    BACKEND:{getByName:()=>({fetch:async()=>{calls.push('container');return Response.json(idle);}})}};
+  const object=new VerificationRecovery({storage},env);
+  object.readDemand=async()=>{
+    const response=await probe();
+    if(!response.ok)throw Error('Neon unavailable');
+    const state=await response.json();
+    if(typeof state.pending!=='boolean'||typeof state.keep_alive!=='boolean')throw Error('Invalid demand');
+    return state;
+  };
+  return {object,storage,calls,env};
 }
 
 test('an empty queue stops polling, while a future opening has one scheduled wake',async()=>{
-  const r=recovery();await r.object.alarm();assert.equal(r.storage.alarmAt,null);
+  const r=recovery();await r.object.alarm();assert.equal(r.storage.alarmAt,null);assert.deepEqual(r.calls,[],'idle must not start a VM');
   const future=now+24*60*60_000;
   const s=recovery(async()=>Response.json({...idle,next_wake_at:future}));
-  await s.object.alarm();assert.equal(s.storage.alarmAt,future);
+  await s.object.alarm();assert.equal(s.storage.alarmAt,future);assert.deepEqual(s.calls,[],'future voting sleeps until prewarm');
 });
 test('runnable work, prewarming or open voting retains the recovery alarm',async()=>{
   for(const state of [{...idle,pending:true},{...idle,keep_alive:true}]){
-    const r=recovery(async()=>Response.json(state));await r.object.alarm();assert.equal(r.storage.alarmAt,now+60_000);
+    const r=recovery(async()=>Response.json(state));await r.object.alarm();assert.equal(r.storage.alarmAt,now+60_000);assert.deepEqual(r.calls,['container']);
   }
 });
 test('an active durable request lease prevents premature idle, then expires',async()=>{
@@ -71,7 +80,18 @@ test('failed or malformed probes keep a durable retry scheduled',async()=>{
   for(const response of [new Response(null,{status:503}),Response.json({pending:false})]){
     const r=recovery(async()=>response);await assert.rejects(r.object.alarm());
     assert.equal(r.storage.alarmAt,now+60_000);
+    assert.deepEqual(r.calls,[],'a failed Neon check must not boot a VM');
   }
+});
+test('a backend failure during open voting preserves recovery',async()=>{
+  const r=recovery(async()=>Response.json({...idle,keep_alive:true}));
+  r.env.BACKEND.getByName=()=>({fetch:async()=>new Response(null,{status:503})});
+  await assert.rejects(r.object.alarm(),/HTTP 503/);
+  assert.equal(r.storage.alarmAt,now+60_000);
+});
+test('generic root monitoring does not start the backend or arm recovery',async()=>{
+  const response=await worker.fetch(new Request('https://backend.example/'),{});
+  assert.equal(response.status,404);
 });
 test('JSON submission arms recovery before forwarding and finishes its lease',async()=>{
   const events=[];

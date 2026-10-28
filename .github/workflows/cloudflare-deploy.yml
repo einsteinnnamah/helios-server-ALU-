@@ -22,6 +22,20 @@ jobs:
     if: ${{ !inputs.verify_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: helios
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,6 +57,7 @@ jobs:
         run: |
           docker build --tag alu-cloudflare-validated .
           docker run --rm --entrypoint python alu-cloudflare-validated -c "import django,pathlib; assert django.get_version(); assert pathlib.Path('/app/helios/models.py').stat().st_size > 1000; assert not pathlib.Path('/app/.local-testing').exists(); assert not pathlib.Path('/app/cloudflare').exists()"
+          python scripts/check-container-startup.py alu-cloudflare-validated '${{ job.services.postgres.id }}'
 
   deploy:
     if: ${{ always() && (needs.validate.result == 'success' || inputs.verify_only) }}
@@ -64,7 +79,11 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: c66816623540ac2342c071dee2a16704
-        run: npx wrangler deploy --keep-vars
+        run: |
+          set -o pipefail
+          voting_deploy_log="$RUNNER_TEMP/alu-backend-deploy.log"
+          npx wrangler deploy --keep-vars | tee "$voting_deploy_log"
+          node deployed-image.mjs "$voting_deploy_log" >> "$GITHUB_ENV"
       - name: Verify backend placement near the Ohio database
         working-directory: cloudflare
         env:

@@ -15,7 +15,8 @@ function wrangler(...args) {
 }
 
 export async function verifyPlacement({run=wrangler,fetcher=fetch,
-  wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),attempts=12}={}) {
+  wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),attempts=120,
+  expectedImage=process.env.EXPECTED_CONTAINER_IMAGE}={}) {
   const applications = run('list');
   const application = applications.find(a=>a.name==='alu-voting-backend-votingbackend');
   if (!application) throw new Error('Voting backend application was not found.');
@@ -34,15 +35,18 @@ export async function verifyPlacement({run=wrangler,fetcher=fetch,
         container_region:probe.headers.get('x-voting-region'),
         database_region:probe.headers.get('x-voting-database-region'),
         database_pooler:probe.headers.get('x-voting-database-pooler'),
+        automatic_completion:probe.headers.get('x-voting-automatic-completion'),
       };
+      const current=run('info',application.id);
       const instances=run('instances',application.id);
       const rows=Array.isArray(instances)?instances:instances.instances;
       if (!Array.isArray(rows)) throw new Error('Unknown instance response.');
-      const active=rows.filter(i=>i.location && i.state==='running');
-      if (probe.status===404 && active.length && diagnostic.database_region==='us-east-2' &&
+      const active=rows.filter(i=>i.location && i.state==='running' && i.version===current.version);
+      if (probe.status===404 && active.length && (!expectedImage||current.configuration?.image===expectedImage) &&
+          diagnostic.automatic_completion==='enabled' && diagnostic.database_region==='us-east-2' &&
           diagnostic.database_pooler==='direct' && diagnostic.container_region?.toUpperCase()==='ENAM' &&
           diagnostic.container_location && diagnostic.container_location!=='unknown') {
-        return {constraints,...diagnostic,instances:active.map(i=>({state:i.state,
+        return {constraints,...diagnostic,image:current.configuration?.image,version:current.version,instances:active.map(i=>({state:i.state,version:i.version,
           location:typeof i.location==='string'?i.location:i.location?.name,region:i.location?.region}))};
       }
     } catch {
@@ -50,7 +54,7 @@ export async function verifyPlacement({run=wrangler,fetcher=fetch,
     }
     if (attempt+1<attempts) await wait(5000);
   }
-  throw new Error('Container placement did not converge to the direct Ohio database configuration.');
+  throw new Error('Container placement did not converge to the expected running image with automatic completion and a direct Ohio database.');
 }
 if (process.argv[1] && pathToFileURL(process.argv[1]).href===import.meta.url) {
   console.log(JSON.stringify(await verifyPlacement(),null,2));

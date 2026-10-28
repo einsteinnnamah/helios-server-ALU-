@@ -1,5 +1,7 @@
+# Keep application rollouts on the base verified by the working ALU image.
+# A floating tag changed Debian layers during the 28 October rollout.
 FROM ghcr.io/astral-sh/uv:0.12.23 AS uv
-FROM python:3.13-slim-bookworm
+FROM python:3.13-slim-bookworm@sha256:93498f36dc7e24ef233bfdf6cc17d4b8bd32d94ee737143e906460d5f5a914c5
 
 # python-ldap is imported by this fork even when ALU is the only login.
 RUN apt-get update && apt-get install -y --no-install-recommends \
